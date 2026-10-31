@@ -6,7 +6,24 @@ Pi 1.4.0 fullscreen 内的原生左侧文件树。右侧保留 Pi 主界面、�
 
 ## 安装
 
-本地发布使用 `npm pack` 生成版本包，解包到 Pi 的独立安装目录后注册全局包：
+本地发布使用 `npm pack` 生成版本包，解包到 Pi 的独立安装目录后注册全局包。在源码仓库执行：
+
+```bash
+./scripts/publish-install.sh
+
+# 仅校验并打包，不修改 Pi 安装或设置
+./scripts/publish-install.sh --pack-only
+```
+
+脚本要求已有开发依赖（首次运行前执行 `npm install --ignore-scripts`），先运行类型检查，再打包；不上传 npm、不提交代码、不自动重载 Pi。
+
+- 从 `package.json` 读取版本，不自动递增；包和清单输出到 `artifacts/releases/<版本>/`，npm 缓存放在 `artifacts/npm-cache/`，均不入库。
+- 默认安装到 `~/.pi/agent/local-packages/pi-file-sidebar/<版本>`；设置了 `PI_CODING_AGENT_DIR` 时使用该目录。自动安装只接受 Pi 1.4.0。
+- 同版本目录内容一致时复用，内容不同或目标为符号链接时拒绝覆盖。**修改发布内容后，先提升 `package.json` 版本号再发布。**
+- 新版注册成功且核验持久化后，才移除同一安装根目录下其他版本的全局注册；保留旧版本文件，不处理其他位置的安装或项目级注册。有自定义资源过滤的侧栏注册需手动切换，不会被脚本覆盖。
+- 失败时停止并保留诊断，不修改目录所有权、不强删活动锁。若旧注册清理失败，新旧注册可能同时保留；处理后重试脚本，成功前不要 `/reload`。
+
+已解包的版本也可以手动注册：
 
 ```bash
 pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.2
