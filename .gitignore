@@ -25,3 +25,4 @@ artifacts/
 test/
 evidence/
 package-lock.json
+AGENTS.md
