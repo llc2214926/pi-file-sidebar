@@ -1,0 +1,27 @@
+# Local command transcripts
+install-*.txt
+
+# Dependencies and local package manager state
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+
+# Build, coverage, caches and editor files
+dist/
+build/
+coverage/
+.cache/
+.ruff_cache/
+.DS_Store
+*.swp
+*.swo
+
+# Local package artifacts and generated tarballs
+artifacts/
+*.tgz
+
+# Historical test and acceptance material
+test/
+evidence/
+package-lock.json
