@@ -1,6 +1,6 @@
 {
   "name": "pi-file-sidebar",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Pi 1.4.0 fullscreen 原生左侧文件树",
   "type": "module",

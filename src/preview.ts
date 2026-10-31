@@ -5,6 +5,7 @@ import { getLanguageFromPath, highlightCode, type Theme } from "@earendil-works/
 import { matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { validateFile } from "./actions.ts";
 import { displayText } from "./tree.ts";
+import { overlayHeight } from "./frame.ts";
 
 export const MAX_PREVIEW_BYTES = 512 * 1024;
 export const MAX_PREVIEW_LINES = 5000;
@@ -53,7 +54,8 @@ export class TextPreview implements Component {
   constructor(private data: PreviewData, private theme: () => Theme, private tui: TUI, private done: () => void) {}
 
   render(width: number): string[] {
-    this.pageSize = Math.max(1, Math.min(30, this.tui.terminal.rows - 4) - 3);
+    // 预览标题、统计、页脚和双线框共占 5 行，始终保留底边及关闭提示。
+    this.pageSize = Math.max(1, Math.min(30, overlayHeight(this.tui.terminal.rows)) - 5);
     this.offset = Math.max(0, Math.min(this.offset, this.data.lines.length - this.pageSize));
     const key = `${width}:${this.pageSize}:${this.offset}`;
     if (this.cache?.key === key) return this.cache.lines;

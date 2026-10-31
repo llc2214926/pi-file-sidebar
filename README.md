@@ -9,7 +9,7 @@ Pi 1.4.0 fullscreen 内的原生左侧文件树。右侧保留 Pi 主界面、�
 本地发布使用 `npm pack` 生成版本包，解包到 Pi 的独立安装目录后注册全局包：
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.1
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.2
 ```
 
 该安装目录由本地版本包生成。安装后在当前 Pi 执行 `/reload` 或重启 Pi。运行时使用独立安装副本，不依赖源码仓库，不需要 npm 账号。
@@ -67,6 +67,8 @@ pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.1
 - off/on 保留已确认宽度、选择和展开；reload/新运行时回默认 32。没有持久配置写入。
 
 ## 文件动作与安全边界
+
+只读预览和 Space 操作菜单统一使用双线边框，边框颜色跟随当前主题；主文件树及主对话布局不变。
 
 ### 只读预览
 

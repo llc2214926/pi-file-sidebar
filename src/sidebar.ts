@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename, dirname, relative, resolve } from "node:path";
 import { getSelectListTheme, type ExtensionContext, type ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { Container, ScrollView, SelectList, Text, VStack, matchesKey, truncateToWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Container, ScrollView, SelectList, TruncatedText, VStack, matchesKey, truncateToWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { copyPath, formatReference, parseEditorCommand, readEditorCommand, validateFile } from "./actions.ts";
 import { ACTIVATE, SidebarHost } from "./host.ts";
 import { FileTree, displayText, isWithin } from "./tree.ts";
 import { readPreview, TextPreview } from "./preview.ts";
+import { DoubleBorder, overlayHeight } from "./frame.ts";
 
 export class FileSidebar {
   readonly host: SidebarHost;
@@ -140,7 +141,7 @@ export class FileSidebar {
       if (!this.ready(id)) return;
       await this.ctx.ui.custom<void>((tui, _theme, _keys, done) => {
         this.closeModal = done;
-        return new TextPreview(data, () => this.ctx.ui.theme, tui, done);
+        return new DoubleBorder(new TextPreview(data, () => this.ctx.ui.theme, tui, done), (text) => this.ctx.ui.theme.fg("border", text));
       }, { overlay: true, overlayOptions: { width: "85%", maxHeight: "90%" } });
     });
   }
@@ -201,17 +202,36 @@ export class FileSidebar {
       ];
       const result = await this.ctx.ui.custom<string | undefined>((tui, _theme, _keys, done) => {
         this.closeModal = () => done(undefined);
-        const list = new SelectList(items, Math.max(1, Math.min(8, tui.terminal.rows - 5)), getSelectListTheme());
-        list.onCancel = () => done(undefined);
-        list.onSelect = (item) => {
-          if (item.value === "external" && !this.ctx.isIdle()) { this.report("Pi 正在工作，外部编辑器不可用"); return; }
-          done(item.value);
+        // 双线框、标题、页脚和列表滚动提示最多占 5 行。
+        const visibleItems = () => Math.max(1, Math.min(8, overlayHeight(tui.terminal.rows) - 5));
+        const createList = (maxVisible: number, selected?: string) => {
+          const list = new SelectList(items, maxVisible, getSelectListTheme());
+          list.onCancel = () => done(undefined);
+          list.onSelect = (item) => {
+            if (item.value === "external" && !this.ctx.isIdle()) { this.report("Pi 正在工作，外部编辑器不可用"); return; }
+            done(item.value);
+          };
+          if (selected) list.setSelectedIndex(items.findIndex((item) => item.value === selected));
+          return list;
         };
+        let maxVisible = visibleItems(), list = createList(maxVisible);
         const component: Container & Component = new Container();
-        component.addChild(new Text(displayText(relative(this.tree.root, path) || "."), 0, 0));
-        component.addChild(list); component.addChild(new Text("↑↓ Enter / 点击选择 · Esc 返回", 0, 0));
+        component.addChild(new TruncatedText(displayText(relative(this.tree.root, path) || ".")));
+        component.addChild({
+          render: (width) => {
+            const next = visibleItems();
+            if (next !== maxVisible) {
+              list = createList(next, list.getSelectedItem()?.value);
+              maxVisible = next;
+            }
+            return list.render(width);
+          },
+          handleMouse: (event) => list.handleMouse(event),
+          invalidate: () => list.invalidate(),
+        });
+        component.addChild(new TruncatedText("↑↓ Enter / 点击选择 · Esc 返回"));
         component.handleInput = (data) => list.handleInput(data);
-        return component;
+        return new DoubleBorder(component, (text) => this.ctx.ui.theme.fg("border", text));
       }, { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%" } });
       if (this.currentAction(id)) choice = result;
     });
