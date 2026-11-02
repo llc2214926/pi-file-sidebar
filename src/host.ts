@@ -2,6 +2,7 @@ import { VERSION, type CustomEditor, type ExtensionContext } from "@earendil-wor
 import { HStack, isViewportTUI, type Component, type TUI } from "@earendil-works/pi-tui";
 
 type NativeTUI = TUI & { layoutRoot?: Component; getFocusedComponent(): Component | null };
+export type HostReason = "disposed" | "incompatible" | "closed" | "regular" | "waiting" | "small" | "external" | "mounted" | "takenOver";
 const PROBE = "pi-file-sidebar:host";
 export const ACTIVATE = "ctrl+shift+e";
 
@@ -27,7 +28,7 @@ export class SidebarHost {
   private editor: Component | null = null;
   private enabled = true;
   private disposed = false;
-  private retired = "";
+  private retired?: "incompatible" | "takenOver";
   private candidate = 32;
   private original?: number;
   private blocked = 0;
@@ -62,14 +63,14 @@ export class SidebarHost {
     const focus = this.raw?.getFocusedComponent?.();
     return this.visible && !this.blocked && !this.paused && (focus === this.target || (focus === this.editor && !!this.editor));
   }
-  get reason() {
-    if (this.disposed) return "已卸载";
+  get reason(): HostReason {
+    if (this.disposed) return "disposed";
     if (this.retired) return this.retired;
-    if (!this.enabled) return "用户已关闭";
-    if (this.raw?.mode !== "fullscreen") return "仅 fullscreen 模式显示";
-    if (!this.main || !this.wrapper) return "等待宿主布局";
-    if (this.raw.terminal.rows < 8 || this.maxWidth < this.width) return "窗口不足：需宽度≥侧栏+65、高度≥8";
-    return this.paused ? "外部编辑器使用终端中" : "已挂载";
+    if (!this.enabled) return "closed";
+    if (this.raw?.mode !== "fullscreen") return "regular";
+    if (!this.main || !this.wrapper) return "waiting";
+    if (this.raw.terminal.rows < 8 || this.maxWidth < this.width) return "small";
+    return this.paused ? "external" : "mounted";
   }
   get tui(): TUI | undefined { return this.alive ? this.raw : undefined; }
 
@@ -90,7 +91,7 @@ export class SidebarHost {
     const tui = this.raw;
     if (!tui || this.disposed || this.paused) return;
     if (VERSION !== "1.4.0" || typeof tui.getFocusedComponent !== "function") {
-      this.retired = "宿主不兼容：仅验证 Pi 1.4.0 原生焦点/布局";
+      this.retired = "incompatible";
     }
     if (this.retired) { this.emit(); return; }
     if (tui.mode !== "fullscreen" || !isViewportTUI(tui)) {
@@ -99,7 +100,7 @@ export class SidebarHost {
     }
     if (this.wrapper && tui.layoutRoot !== this.wrapper) {
       this.finishResize(false); this.release();
-      if (tui.layoutRoot) this.retired = "其他扩展已接管布局；本侧栏已退让";
+      if (tui.layoutRoot) this.retired = "takenOver";
       this.wrapper = undefined; this.main = undefined;
       if (this.retired) { tui.requestRender(); this.emit(); return; }
     }

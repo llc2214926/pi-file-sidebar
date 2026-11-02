@@ -9,7 +9,7 @@ export interface TreeNode {
   kind: NodeKind;
   state: "unloaded" | "loading" | "loaded" | "error";
   children: string[];
-  error?: string;
+  error?: { code?: string };
 }
 export interface TreeRow { node: Readonly<TreeNode>; depth: number }
 type Reader = (path: string) => Promise<Dirent[]>;
@@ -21,11 +21,6 @@ export function isWithin(root: string, path: string): boolean {
 export function displayText(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,
     (char) => `\\u{${char.codePointAt(0)!.toString(16)}}`);
-}
-function errorText(error: unknown): string {
-  const code = (error as NodeJS.ErrnoException)?.code;
-  return code === "EACCES" || code === "EPERM" ? "没有读取权限" : code === "ENOENT" ? "目录已消失"
-    : code === "ELOOP" ? "目录为符号链接，未读取" : `读取失败${code ? `：${code}` : ""}`;
 }
 async function readDirectory(root: string, path: string): Promise<Dirent[]> {
   const rootPath = resolve(root), child = relative(rootPath, path);
@@ -197,7 +192,8 @@ export class FileTree {
       this.changed(this.current !== previous);
     }, (error: unknown) => {
       if (this.disposed || generation !== this.generation || this.nodes.get(path) !== node) return;
-      node.state = "error"; node.error = errorText(error); this.changed();
+      const code = (error as NodeJS.ErrnoException)?.code;
+      node.state = "error"; node.error = { code: typeof code === "string" ? code : undefined }; this.changed();
     }).finally(() => {
       if (this.flights.get(path) === promise) this.flights.delete(path);
       if (!this.disposed && this.active && this.dirty.has(path)) this.schedule();

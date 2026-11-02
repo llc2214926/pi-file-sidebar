@@ -6,6 +6,7 @@ import { matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI
 import { validateFile } from "./actions.ts";
 import { displayText } from "./tree.ts";
 import { overlayHeight } from "./frame.ts";
+import { getMessages, SidebarError, type Language } from "./i18n.ts";
 
 export const MAX_PREVIEW_BYTES = 512 * 1024;
 export const MAX_PREVIEW_LINES = 5000;
@@ -15,7 +16,7 @@ export interface PreviewData {
   lines: string[];
   bytesRead: number;
   truncated: boolean;
-  message?: string;
+  message?: "binary" | "invalidUtf8";
 }
 
 export async function readPreview(root: string, path: string): Promise<PreviewData> {
@@ -23,7 +24,7 @@ export async function readPreview(root: string, path: string): Promise<PreviewDa
   const file = await open(actual, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await file.stat();
-    if (!info.isFile()) throw new Error("目标已不是普通文件");
+    if (!info.isFile()) throw new SidebarError("fileChanged");
     const bytes = Buffer.alloc(Math.min(MAX_PREVIEW_BYTES, info.size));
     let bytesRead = 0;
     while (bytesRead < bytes.length) {
@@ -33,12 +34,12 @@ export async function readPreview(root: string, path: string): Promise<PreviewDa
     }
     const source = bytes.subarray(0, bytesRead), truncated = info.size > bytesRead;
     const result: PreviewData = { path: relative(root, path), text: "", lines: [], bytesRead, truncated };
-    if (source.includes(0)) return { ...result, message: "二进制文件，不能文本预览。Esc 返回后可用外部编辑器打开。" };
+    if (source.includes(0)) return { ...result, message: "binary" };
     let text: string;
     try {
       // 达到字节上限时丢弃末尾不完整的 UTF-8 字符，而非制造替换字符。
       text = new TextDecoder("utf-8", { fatal: true }).decode(source, { stream: truncated });
-    } catch { return { ...result, message: "文件不是有效 UTF-8 文本。Esc 返回后可用外部编辑器打开。" }; }
+    } catch { return { ...result, message: "invalidUtf8" }; }
     const lines = text ? text.replace(/\r\n/g, "\n").split("\n") : [];
     if (text.endsWith("\n")) lines.pop();
     return { ...result, text, lines: lines.slice(0, MAX_PREVIEW_LINES), truncated: truncated || lines.length > MAX_PREVIEW_LINES };
@@ -51,23 +52,25 @@ export class TextPreview implements Component {
   private footerY = 0;
   private colored?: string[];
   private cache?: { key: string; lines: string[] };
-  constructor(private data: PreviewData, private theme: () => Theme, private tui: TUI, private done: () => void) {}
+  constructor(private data: PreviewData, private theme: () => Theme, private tui: TUI, private done: () => void,
+    private language: () => Language = () => "zh") {}
 
   render(width: number): string[] {
     // 预览标题、统计、页脚和双线框共占 5 行，始终保留底边及关闭提示。
     this.pageSize = Math.max(1, Math.min(30, overlayHeight(this.tui.terminal.rows)) - 5);
     this.offset = Math.max(0, Math.min(this.offset, this.data.lines.length - this.pageSize));
-    const key = `${width}:${this.pageSize}:${this.offset}`;
+    const language = this.language(), text = getMessages(language).preview;
+    const key = `${width}:${this.pageSize}:${this.offset}:${language}`;
     if (this.cache?.key === key) return this.cache.lines;
     const theme = this.theme(), digits = String(Math.max(1, this.data.lines.length)).length;
     if (!this.colored) this.colored = highlightCode(this.data.lines.map((line) => displayText(line.replace(/\t/g, "    "))).join("\n"), getLanguageFromPath(this.data.path));
-    const body = this.data.message ? wrapTextWithAnsi(this.data.message, width).slice(0, this.pageSize)
+    const body = this.data.message ? wrapTextWithAnsi(text[this.data.message], width).slice(0, this.pageSize)
       : this.data.lines.length ? this.colored.slice(this.offset, this.offset + this.pageSize).map((line, i) => `${theme.fg("dim", String(this.offset + i + 1).padStart(digits) + " ")} ${line}`)
-      : [theme.fg("dim", "（空文件）")];
-    const lines = [theme.fg("accent", `只读 · ${displayText(this.data.path)}`),
-      `${this.data.bytesRead} 字节 · ${this.data.lines.length} 行${this.data.truncated ? " · 已截断（512 KiB / 5000 行上限）" : ""}`,
+      : [theme.fg("dim", text.empty)];
+    const lines = [theme.fg("accent", `${text.title} · ${displayText(this.data.path)}`),
+      text.stats(this.data.bytesRead, this.data.lines.length) + (this.data.truncated ? text.truncated : ""),
       ...body,
-      theme.fg("dim", `${this.data.lines.length ? this.offset + 1 : 0}/${this.data.lines.length} · ↑↓ PgUp/PgDn · Esc/点击关闭`),
+      theme.fg("dim", `${this.data.lines.length ? this.offset + 1 : 0}/${this.data.lines.length} · ${text.footer}`),
     ].map((line) => truncateToWidth(line, width));
     this.footerY = lines.length - 1;
     this.cache = { key, lines }; return lines;

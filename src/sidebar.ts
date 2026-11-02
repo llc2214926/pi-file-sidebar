@@ -1,12 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename, dirname, relative, resolve } from "node:path";
 import { getSelectListTheme, type ExtensionContext, type ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { Container, ScrollView, SelectList, TruncatedText, VStack, matchesKey, truncateToWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Container, ScrollView, SelectList, TruncatedText, VStack, matchesKey, truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { copyPath, formatReference, parseEditorCommand, readEditorCommand, validateFile } from "./actions.ts";
 import { ACTIVATE, SidebarHost } from "./host.ts";
 import { FileTree, displayText, isWithin } from "./tree.ts";
 import { readPreview, TextPreview } from "./preview.ts";
 import { DoubleBorder, overlayHeight } from "./frame.ts";
+import { SidebarHelp } from "./help.ts";
+import { describeError, getMessages, isLanguage, SidebarError, type Language } from "./i18n.ts";
+import { saveLanguage } from "./language.ts";
 
 export class FileSidebar {
   readonly host: SidebarHost;
@@ -26,8 +29,11 @@ export class FileSidebar {
   private externalRunning = false;
   private child?: ChildProcess;
   private externalDone?: Promise<number | null>;
+  private languageSave: Promise<void> = Promise.resolve();
+  private languageGeneration = 0;
 
-  constructor(private ctx: ExtensionContext) {
+  constructor(private ctx: ExtensionContext, private language: Language = "zh",
+    private persistLanguage: (language: Language) => Promise<void> = saveLanguage) {
     this.tree = new FileTree(ctx.cwd, (reveal) => {
       this.cache = undefined;
       if (reveal) this.revealSelection();
@@ -38,19 +44,21 @@ export class FileSidebar {
     this.scroll = new ScrollView(this.rows, { follow: "none", overscroll: "contain", scrollbar: "auto" });
     // 1.4.0 的 contain 仍会将边界残余量回退到主对话；只在自己的组件消费 wheel。
     this.scroll.handleMouse = (event) => this.wheel(event, this.scroll);
-    const text = (lines: () => string[]): Component => ({ render: (width) => lines().map((line) => truncateToWidth(line, width)), invalidate() {} });
+    const text = (lines: (width: number) => string[]): Component => ({ render: (width) => lines(width).map((line) => truncateToWidth(line, width)), invalidate() {} });
     this.panel = new VStack([
-      { component: text(() => [this.ctx.ui.theme.fg("accent", `Files${this.tree.showHidden ? " · 隐藏项可见" : ""}`), displayText(basename(this.tree.root) || this.tree.root)]), basis: 2, shrink: 0 },
+      { component: text(() => [this.ctx.ui.theme.fg("accent", `${this.texts.title} · ${this.texts.switchHint}${this.tree.showHidden ? this.texts.hidden : ""}`), displayText(basename(this.tree.root) || this.tree.root)]), basis: 2, shrink: 0 },
       { component: this.scroll, basis: 0, grow: 1, minSize: 1 },
-      { component: text(() => this.host?.resizing
-        ? [`宽度：${this.host.width} 列 · 24–${this.host.maxWidth}`, "←→ Enter确认 Esc取消"]
-        : [displayText(relative(this.tree.root, this.tree.selected) || "."), "Enter 预览 · Space 操作 · w 调宽"]), basis: 2, shrink: 0 },
+      { component: text((width) => this.host?.resizing
+        ? [this.texts.width(this.host.width, this.host.maxWidth), this.texts.resizeHint]
+        : [displayText(relative(this.tree.root, this.tree.selected) || "."), visibleWidth(this.texts.footer) <= width ? this.texts.footer : this.texts.compactFooter]), basis: 2, shrink: 0 },
     ]);
     this.panel.handleMouse = (event) => this.wheel(event, this.panel);
     this.host = new SidebarHost(ctx, this.panel, this.rows, () => this.hostChanged());
   }
 
   get scrollTop() { return this.scroll.scrollTop; }
+  get currentLanguage() { return this.language; }
+  private get texts() { return getMessages(this.language); }
   private hostChanged() {
     if (this.disposed) return;
     const visible = this.host?.visible ?? false, focused = this.host?.focused ?? false;
@@ -64,15 +72,15 @@ export class FileSidebar {
     this.wasFocused = focused;
   }
   private renderRows(width: number): string[] {
-    const key = `${width}:${this.tree.revision}:${this.host?.focused}`;
+    const key = `${width}:${this.tree.revision}:${this.host?.focused}:${this.language}`;
     if (this.cache?.key === key) return this.cache.lines;
     const data = this.tree.rows();
     this.frame = data.map(({ node, depth }) => ({ path: node.path, marker: 2 + depth * 2 }));
     const lines = data.map(({ node, depth }) => {
       const selected = node.path === this.tree.selected;
       const icon = node.kind === "directory" ? (this.tree.expanded.has(node.path) ? "▾" : "▸") : node.kind === "symlink" ? "↗" : " ";
-      const state = node.state === "loading" ? "（加载中）" : node.error ? `（${node.error}）`
-        : node.kind === "directory" && node.state === "loaded" && !node.children.length ? "（空目录）" : "";
+      const state = node.state === "loading" ? this.texts.loading : node.error ? ` (${displayText(this.texts.directoryError(node.error.code))})`
+        : node.kind === "directory" && node.state === "loaded" && !node.children.length ? this.texts.emptyDirectory : "";
       const label = `${selected ? ">" : " "} ${"  ".repeat(depth)}${icon} ${displayText(node.name)}${state}`;
       return truncateToWidth(this.ctx.ui.theme.fg(selected && this.host?.focused ? "accent" : node.error ? "error" : "text", label), width);
     });
@@ -98,19 +106,43 @@ export class FileSidebar {
     }
   }
 
-  command(args: string) {
+  async command(args: string) {
+    if (this.disposed) return;
     const [name = "focus", value, ...rest] = args.trim().split(/\s+/).filter(Boolean);
     if (name === "focus" && !value) this.host.enter();
     else if (name === "on" && !value) this.host.setEnabled(true);
     else if (name === "off" && !value) this.host.setEnabled(false);
     else if (name === "refresh" && !value) void this.tree.refresh();
+    else if (name === "lang" && !rest.length && (!value || isLanguage(value))) {
+      if (isLanguage(value)) await this.changeLanguage(value, true);
+      else this.ctx.ui.notify(this.texts.languageStatus, "info");
+      return;
+    }
     else if (name === "width" && !rest.length && value && /^\d+$/.test(value) && this.host.setWidth(Number(value))) return;
     else if (name !== "status" || value) {
-      this.ctx.ui.notify("用法：/file-sidebar [focus|on|off|refresh|width 24…48|status]", "warning"); return;
+      this.ctx.ui.notify(this.texts.usage, "warning"); return;
     }
     if (name === "status" || (name === "focus" && !this.host.focused)) {
-      this.ctx.ui.notify(`${this.host.reason}；宽度 ${this.host.width}；焦点 ${this.host.focused ? "文件树" : "Pi"}；缓存 ${this.tree.size} 项；读取中 ${this.tree.pending}`, "info");
+      this.ctx.ui.notify(this.texts.status(this.texts.host[this.host.reason], this.host.width, this.host.focused, this.tree.size, this.tree.pending), "info");
     }
+  }
+
+  private changeLanguage(language: Language, announce = false): Promise<void> {
+    if (this.disposed || !this.host.alive || this.externalRunning) return Promise.resolve();
+    this.language = language;
+    const generation = ++this.languageGeneration;
+    this.host.redraw(); // 仅使 UI 失效，不改变树模型、宽度、焦点或主编辑器。
+    const current = () => generation === this.languageGeneration && !this.disposed && this.host.alive && !this.externalRunning;
+    // 已明确选择的语言串行保存；dispose 等待队列，避免旧写入覆盖 reload 后的新选择。
+    this.languageSave = this.languageSave.then(async () => {
+      try { await this.persistLanguage(language); }
+      catch (error) {
+        if (current()) this.ctx.ui.notify(displayText(this.texts.languageSaveFailed(describeError(error, this.language))), "warning");
+        return;
+      }
+      if (announce && current()) this.ctx.ui.notify(this.texts.languageSaved, "info");
+    });
+    return this.languageSave;
   }
 
   private currentAction(id: number) { return id === this.actionGeneration && !this.disposed && this.host.alive && this.host.visible; }
@@ -122,7 +154,7 @@ export class FileSidebar {
     if ((!this.host.visible || this.disposed) && this.host.focused) this.host.leave();
   }
   private report(error: unknown) {
-    if (!this.disposed && this.host.alive) this.ctx.ui.notify(displayText(error instanceof Error ? error.message : String(error)), "warning");
+    if (!this.disposed && this.host.alive) this.ctx.ui.notify(displayText(describeError(error, this.language)), "warning");
   }
   private async runAction(work: (id: number) => Promise<void>) {
     if (this.acting || !this.host.canInteract || !this.host.focused || this.host.resizing) return;
@@ -134,21 +166,32 @@ export class FileSidebar {
     }
   }
   private ready(id: number) { return this.currentAction(id) && this.host.canInteract && this.host.focused; }
+  private help() {
+    return this.runAction(async (id) => {
+      await this.ctx.ui.custom<void>((tui, _theme, keys, done) => {
+        this.closeModal = done;
+        const help = new SidebarHelp(() => this.ctx.ui.theme, tui, keys, done, () => this.language, () => {
+          if (this.acting && this.currentAction(id)) void this.changeLanguage(this.language === "zh" ? "en" : "zh");
+        });
+        return new DoubleBorder(help, (text) => this.ctx.ui.theme.fg("border", text));
+      }, { overlay: true, overlayOptions: { width: "85%", maxHeight: "90%" } });
+    });
+  }
   private preview(path = this.tree.selected) {
     return this.runAction(async (id) => {
-      if (this.tree.node(path)?.kind !== "file") throw new Error("此动作仅支持普通文件；链接可以复制路径");
+      if (this.tree.node(path)?.kind !== "file") throw new SidebarError("fileOnlyCopyLink");
       const data = await readPreview(this.tree.root, path);
       if (!this.ready(id)) return;
       await this.ctx.ui.custom<void>((tui, _theme, _keys, done) => {
         this.closeModal = done;
-        return new DoubleBorder(new TextPreview(data, () => this.ctx.ui.theme, tui, done), (text) => this.ctx.ui.theme.fg("border", text));
+        return new DoubleBorder(new TextPreview(data, () => this.ctx.ui.theme, tui, done, () => this.language), (text) => this.ctx.ui.theme.fg("border", text));
       }, { overlay: true, overlayOptions: { width: "85%", maxHeight: "90%" } });
     });
   }
   private copy(absolute = false, path = this.tree.selected) {
     return this.runAction(async (id) => {
       if (await copyPath(this.tree.root, path, absolute, () => this.ready(id))) {
-        if (this.currentAction(id)) this.ctx.ui.notify(`已复制${absolute ? "绝对" : "相对"}路径`, "info");
+        if (this.currentAction(id)) this.ctx.ui.notify(absolute ? this.texts.copiedAbsolute : this.texts.copiedRelative, "info");
       }
     });
   }
@@ -162,11 +205,11 @@ export class FileSidebar {
   }
   private external(path = this.tree.selected) {
     return this.runAction(async (id) => {
-      if (!this.ctx.isIdle()) throw new Error("Pi 正在工作，不能启动外部编辑器；请等待空闲");
+      if (!this.ctx.isIdle()) throw new SidebarError("editorBusy");
       const [actual, command] = await Promise.all([validateFile(this.tree.root, path), readEditorCommand(this.ctx.cwd, this.ctx.isProjectTrusted())]);
       const argv = parseEditorCommand(command);
       if (!this.ready(id)) return;
-      if (!this.ctx.isIdle()) throw new Error("Pi 已开始工作，取消编辑器启动");
+      if (!this.ctx.isIdle()) throw new SidebarError("editorBusyChanged");
       const tui = this.host.tui!;
       this.externalRunning = true; this.host.setPaused(true);
       let code: number | null = null;
@@ -184,52 +227,54 @@ export class FileSidebar {
         }
       }
       if (!this.currentAction(id)) return;
-      if (code !== 0) throw new Error(code === null ? "编辑器进程已被终止" : `编辑器退出码：${code}`);
-      this.ctx.ui.notify("编辑器进程已结束；GUI 启动器没有等待参数时，不代表文件已编辑完毕", "info");
+      if (code === null) throw new SidebarError("editorTerminated");
+      if (code !== 0) throw new Error(this.texts.editorExit(code));
+      this.ctx.ui.notify(this.texts.editorFinished, "info");
     });
   }
   private async menu() {
     const path = this.tree.selected, kind = this.tree.node(path)?.kind;
     let choice: string | undefined;
     await this.runAction(async (id) => {
-      const items = [
-        ...(kind === "directory" ? [{ value: "toggle", label: "展开 / 折叠目录" }] : []),
-        ...(kind === "file" ? [{ value: "preview", label: "只读文本预览" }] : []),
-        { value: "relative", label: "复制相对路径" }, { value: "absolute", label: "复制绝对路径" },
-        ...(kind === "file" ? [{ value: "reference", label: "插入 @引用（不发送）" },
-          { value: "external", label: this.ctx.isIdle() ? "外部编辑器打开" : "外部编辑器（Pi 忙碌，不可用）" }] : []),
-        { value: "cancel", label: "取消" },
-      ];
       const result = await this.ctx.ui.custom<string | undefined>((tui, _theme, _keys, done) => {
         this.closeModal = () => done(undefined);
         // 双线框、标题、页脚和列表滚动提示最多占 5 行。
         const visibleItems = () => Math.max(1, Math.min(8, overlayHeight(tui.terminal.rows) - 5));
         const createList = (maxVisible: number, selected?: string) => {
+          const text = this.texts.menu;
+          const items = [
+            ...(kind === "directory" ? [{ value: "toggle", label: text.toggle }] : []),
+            ...(kind === "file" ? [{ value: "preview", label: text.preview }] : []),
+            { value: "relative", label: text.relative }, { value: "absolute", label: text.absolute },
+            ...(kind === "file" ? [{ value: "reference", label: text.reference },
+              { value: "external", label: this.ctx.isIdle() ? text.external : text.externalBusy }] : []),
+            { value: "cancel", label: text.cancel },
+          ];
           const list = new SelectList(items, maxVisible, getSelectListTheme());
           list.onCancel = () => done(undefined);
           list.onSelect = (item) => {
-            if (item.value === "external" && !this.ctx.isIdle()) { this.report("Pi 正在工作，外部编辑器不可用"); return; }
+            if (item.value === "external" && !this.ctx.isIdle()) { this.report(new SidebarError("editorUnavailable")); return; }
             done(item.value);
           };
           if (selected) list.setSelectedIndex(items.findIndex((item) => item.value === selected));
           return list;
         };
-        let maxVisible = visibleItems(), list = createList(maxVisible);
+        let maxVisible = visibleItems(), list = createList(maxVisible), listLanguage = this.language;
         const component: Container & Component = new Container();
         component.addChild(new TruncatedText(displayText(relative(this.tree.root, path) || ".")));
         component.addChild({
           render: (width) => {
             const next = visibleItems();
-            if (next !== maxVisible) {
+            if (next !== maxVisible || listLanguage !== this.language) {
               list = createList(next, list.getSelectedItem()?.value);
-              maxVisible = next;
+              maxVisible = next; listLanguage = this.language;
             }
             return list.render(width);
           },
           handleMouse: (event) => list.handleMouse(event),
           invalidate: () => list.invalidate(),
         });
-        component.addChild(new TruncatedText("↑↓ Enter / 点击选择 · Esc 返回"));
+        component.addChild({ render: (width) => [truncateToWidth(this.texts.menu.footer, width)], invalidate() {} });
         component.handleInput = (data) => list.handleInput(data);
         return new DoubleBorder(component, (text) => this.ctx.ui.theme.fg("border", text));
       }, { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%" } });
@@ -255,6 +300,8 @@ export class FileSidebar {
       return;
     }
     if (matchesKey(data, "escape")) { this.cancelActions(); this.host.leave(); }
+    else if (matchesKey(data, "h")) void this.help();
+    else if (matchesKey(data, "l") && !this.acting) void this.changeLanguage(this.language === "zh" ? "en" : "zh");
     else if (data === "w") this.host.beginResize();
     else if (matchesKey(data, "up")) this.tree.move(-1);
     else if (matchesKey(data, "down")) this.tree.move(1);
@@ -304,7 +351,7 @@ export class FileSidebar {
       this.disposed = true; this.cancelActions(); this.tree.dispose(); this.scroll.setScrollbar("hidden"); this.host.dispose();
       this.frame = []; this.cache = undefined; this.pressed = undefined; this.clickedPath = undefined;
     }
-    // 会话替换先等待已交接的进程结束；旧进程不能与新 renderer 同时占用 TTY。
-    return pending ? pending.then(() => {}, () => {}) : Promise.resolve();
+    // 会话替换等待旧编辑器和已确认的语言写入；旧结果不能操作新 renderer 或覆盖新偏好。
+    return Promise.allSettled([this.languageSave, pending]).then(() => {});
   }
 }

@@ -65,11 +65,11 @@ if (!pkg || extra.length || pkg.name !== "pi-file-sidebar" || pkg.version !== ve
 const paths = pkg.files.map((file) => file.path);
 for (const path of paths) {
   if (path.split("/").some((part) => !part || part === "." || part === "..") ||
-      !(["package.json", "README.md", "LICENSE"].includes(path) || path.startsWith("src/") || path.startsWith("extensions/"))) {
+      !(["package.json", "README.md", "README.ZH.md", "LICENSE"].includes(path) || path.startsWith("src/") || path.startsWith("extensions/"))) {
     throw new Error(`发布文件超出白名单：${path}`);
   }
 }
-for (const required of ["package.json", "README.md", "LICENSE", "extensions/index.ts"]) {
+for (const required of ["package.json", "README.md", "README.ZH.md", "LICENSE", "extensions/index.ts"]) {
   if (!paths.includes(required)) throw new Error(`版本包缺少 ${required}`);
 }
 process.stdout.write(pkg.filename);
@@ -79,6 +79,7 @@ mkdir -- "$work/package"
 tar -xzf "$work/$filename" -C "$work/package" --strip-components=1
 cmp package.json "$work/package/package.json"
 cmp README.md "$work/package/README.md"
+cmp README.ZH.md "$work/package/README.ZH.md"
 cmp LICENSE "$work/package/LICENSE"
 diff -qr src "$work/package/src"
 diff -qr extensions "$work/package/extensions"

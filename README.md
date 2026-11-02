@@ -1,127 +1,189 @@
 # pi-file-sidebar
 
-Pi 1.4.0 fullscreen 内的原生左侧文件树。右侧保留 Pi 主界面、编辑器和原生对话滚动，不覆盖对话、不运行第二个 renderer。
+**[English](README.md)** | [简体中文](README.ZH.md)
 
-正式功能已实现，正式 TUI 实机验收尚未完成。此前自动回归通过，但不能替代正式扩展的实机验收。
+A native left-side file tree for Pi 1.4.0 fullscreen mode. The Pi main UI, editor, and native conversation scrolling stay on the right; the extension never overlays the conversation and never runs a second renderer.
 
-## 安装
+The feature set is fully implemented, but formal TUI acceptance on a real terminal is not yet complete. Automated regressions pass, but they do not substitute for acceptance testing of the formal extension.
 
-本地发布使用 `npm pack` 生成版本包，解包到 Pi 的独立安装目录后注册全局包。在源码仓库执行：
+## Installation
+
+Local publishing uses `npm pack` to build a versioned package, unpacks it into Pi's standalone install directory, and registers it as a global package. Run from the source repository:
 
 ```bash
 ./scripts/publish-install.sh
 
-# 仅校验并打包，不修改 Pi 安装或设置
+# Validate and pack only; do not modify the Pi install or settings
 ./scripts/publish-install.sh --pack-only
 ```
 
-脚本要求已有开发依赖（首次运行前执行 `npm install --ignore-scripts`），先运行类型检查，再打包；不上传 npm、不提交代码、不自动重载 Pi。
+The script requires the development dependencies to be installed (run `npm install --ignore-scripts` first), runs the type check, then packs. It does not upload to npm, commit code, or auto-reload Pi.
 
-- 从 `package.json` 读取版本，不自动递增；包和清单输出到 `artifacts/releases/<版本>/`，npm 缓存放在 `artifacts/npm-cache/`，均不入库。
-- 默认安装到 `~/.pi/agent/local-packages/pi-file-sidebar/<版本>`；设置了 `PI_CODING_AGENT_DIR` 时使用该目录。自动安装只接受 Pi 1.4.0。
-- 同版本目录内容一致时复用，内容不同或目标为符号链接时拒绝覆盖。**修改发布内容后，先提升 `package.json` 版本号再发布。**
-- 新版注册成功且核验持久化后，才移除同一安装根目录下其他版本的全局注册；保留旧版本文件，不处理其他位置的安装或项目级注册。有自定义资源过滤的侧栏注册需手动切换，不会被脚本覆盖。
-- 失败时停止并保留诊断，不修改目录所有权、不强删活动锁。若旧注册清理失败，新旧注册可能同时保留；处理后重试脚本，成功前不要 `/reload`。
+- The version is read from `package.json` and never auto-incremented; packages and manifests go to `artifacts/releases/<version>/`, the npm cache lives in `artifacts/npm-cache/`, and neither is committed.
+- By default it installs to `~/.pi/agent/local-packages/pi-file-sidebar/<version>`; if `PI_CODING_AGENT_DIR` is set, that directory is used instead. Automatic installation only accepts Pi 1.4.0.
+- An existing version directory with identical content is reused; differing content or a symlinked target is never overwritten. **After changing published content, bump the `package.json` version before publishing.**
+- Old registrations under the same install root are only removed after the new version is registered and the registration is confirmed to be persisted; old version files are kept, and installs in other locations or project-level registrations are not touched. Sidebar registrations with custom resource filters must be switched manually — the script never overwrites them.
+- On failure the script stops and preserves diagnostics; it does not change directory ownership or force-delete live locks. If old-registration cleanup fails, both old and new registrations may remain; resolve the issue and rerun the script, and do not `/reload` Pi until it succeeds.
 
-已解包的版本也可以手动注册：
+An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.2
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.3
 ```
 
-该安装目录由本地版本包生成。安装后在当前 Pi 执行 `/reload` 或重启 Pi。运行时使用独立安装副本，不依赖源码仓库，不需要 npm 账号。
+The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.
 
-入口是 `extensions/index.ts`。包只声明宿主 peerDependencies，不携带第二份 Pi SDK。
+The entry point is `extensions/index.ts`. The package only declares peerDependencies on the host and never ships a second copy of the Pi SDK.
 
-当前开发/测试基线为 Pi **1.4.0**、Node **24.22.2**、macOS Apple Silicon。其他版本、平台与终端没有完成兼容矩阵，不能据此宣称支持。regular 模式隐藏树；RPC/print/JSON 不创建侧栏运行时、不输出 UI/ANSI。宿主布局或焦点能力不兼容、或其他扩展接管 root 时，本扩展不覆盖其布局；用 `status` 查看原因。
+The current development/testing baseline is Pi **1.4.0**, Node **24.22.2**, macOS Apple Silicon. No compatibility matrix has been completed for other versions, platforms, or terminals; do not claim support based on this project. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
 
-## 命令
+## Commands
 
-| 命令 | 行为 |
+| Command | Behavior |
 |---|---|
-| `/file-sidebar`、`/file-sidebar focus` | 显示并进入树焦点 |
-| `/file-sidebar on` | 显示，不主动夺取焦点 |
-| `/file-sidebar off` | 关闭、取消未确认动作/模态并恢复主界面 |
-| `/file-sidebar refresh` | 刷新已加载且可见展开的目录；其他 dirty 目录在重新展开后处理 |
-| `/file-sidebar width 32` | 设置本运行时宽度，接受整数 24–48；窗口不足时暂时隐藏 |
-| `/file-sidebar status` | 模式/挂载或隐藏原因、宽度、焦点、缓存与待处理读取数 |
+| `/file-sidebar`, `/file-sidebar focus` | Show the tree and enter tree focus |
+| `/file-sidebar on` | Show without taking focus |
+| `/file-sidebar off` | Close, cancel unconfirmed actions/modals, and restore the main UI |
+| `/file-sidebar refresh` | Refresh loaded, visible, expanded directories; other dirty directories are handled when re-expanded |
+| `/file-sidebar width 32` | Set this runtime's width; integers 24–48; temporarily hidden when the window is too small |
+| `/file-sidebar lang zh`, `/file-sidebar lang en` | Switch the whole sidebar between Chinese and English and save the choice |
+| `/file-sidebar lang` | Show the current language and switching usage |
+| `/file-sidebar status` | Mode/mount or hide reason, width, focus, cache, pending reads, and current language |
 
-默认激活键为 **Ctrl+Shift+E**。不更改用户 keybindings；若终端无法区分该键或其他扩展存在冲突，使用命令。树内同一快捷键返回 Pi 输入框。
+The default activation key is **Ctrl+Shift+E**. User keybindings are never modified; if your terminal cannot distinguish that key or another extension conflicts with it, use the commands. The same shortcut inside the tree returns to the Pi input box.
 
-## 键盘与鼠标
+## Keyboard and Mouse
 
-| 树内输入 | 行为 |
+| Input in tree | Behavior |
 |---|---|
-| ↑ / ↓、Home / End | 移动选择 |
-| → / ← | 展开目录；折叠目录或回父目录 |
-| Ctrl+U / Ctrl+D | 树内半页移动 |
-| Enter | 目录展开/折叠；普通文件只读预览 |
-| Space | 原生操作菜单，支持键盘和鼠标选择 |
-| y | 复制相对路径；绝对路径在菜单中 |
-| a | 插入文件路径引用，返回主输入框，不发送 |
-| e | Pi 空闲时启动选中文件的外部编辑器 |
-| r | 手动刷新 |
-| . | 显示/隐藏点项与 node_modules |
-| w | 进入键盘调宽 |
-| Esc / Ctrl+C | 返回原 Pi 输入对象，不清空草稿或中断 agent |
+| ↑ / ↓, Home / End | Move selection |
+| → / ← | Expand directory; collapse directory or go to parent |
+| Ctrl+U / Ctrl+D | Half-page movement inside the tree |
+| Enter | Expand/collapse directories; read-only preview for regular files |
+| Space | Native action menu, selectable via keyboard and mouse |
+| y | Copy the relative path; the absolute path is in the menu |
+| a | Insert a file reference, return to the main input box, do not send |
+| e | Launch the external editor for the selected file when Pi is idle |
+| r | Manual refresh |
+| . | Show/hide dot entries and node_modules |
+| w | Enter keyboard width adjustment |
+| h | Open the full key help |
+| l | Toggle sidebar Chinese/English and save the choice (also works in help) |
+| Esc / Ctrl+C | Return to the original Pi input object; drafts are kept and the agent is not interrupted |
 
-文件单击只选择；双击同一文件预览。目录展开标记可点击。滚轮只滚动侧栏，不因 hover 夺焦点，边界不传到主对话。原生滚动条负责滚动拖动；不拖动文件或分隔线。
+Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. The native scrollbar handles scroll dragging; files and the divider are not draggable.
 
-**PageUp/PageDown 策略：**普通树焦点下保留 Pi 的主对话翻页；树用 Ctrl+U/Ctrl+D。在捕获焦点的预览中，PageUp/PageDown 控制预览。主输入框的 Tab、Ctrl+B 等原有行为不改动；树内未定义的普通键不会偷偷写入主草稿。
+**PageUp/PageDown policy:** with normal tree focus, Pi's main conversation paging is preserved; the tree uses Ctrl+U/Ctrl+D. In the preview or help panel that captures focus, PageUp/PageDown control that panel, not the main conversation. The original behavior of Tab, Ctrl+B, etc. in the main input box is unchanged; undefined plain keys inside the tree are never written to the main draft.
 
-## 键盘调宽
+## Interface Language
 
-默认 32 列，分隔线 1 列，为主界面至少保留 64 列；默认显示阈值是 **97 列**，高度至少 **8 行**。
+First use defaults to **Chinese**, with full sidebar Chinese/English switching:
 
-- 树有焦点且没有阻塞模态时，`w` 进入调宽。
-- ←/→ 调整 1 列；支持扩展键协议的终端可用 Shift+←/→ 调整 4 列。
-- 候选范围为 `24 … min(48, 终端列数 − 65)`；上限不足 24 时不能进入。
-- 即时预览只重建自有 HStack，保留主 root、编辑器、树和 ScrollView，不读取目录。
-- Enter 确认，Esc 恢复进入前宽度，两者均回树导航。
-- Ctrl+C/激活键取消后回 Pi 输入框。
-- 离开树、阻塞模态、off、reload、会话/模式替换、宿主失效时取消未确认值。
-- 缩窗使候选不可见时先恢复原宽度；原宽度仍能显示则保留树焦点，否则隐藏并释放焦点。
-- off/on 保留已确认宽度、选择和展开；reload/新运行时回默认 32。没有持久配置写入。
+```text
+/file-sidebar lang en   Switch to English
+/file-sidebar lang zh   Switch to Chinese
+/file-sidebar lang      Show the current language
+```
 
-## 文件动作与安全边界
+Press lowercase `l` while the tree has focus or inside the `h` help for a quick toggle; the extended key protocol is supported. `l:EN` / `l:ZH` in the title indicates the key and the target language. Width adjustment, the action menu, preview, and other blocking modals do not capture that single key; `l` in the main input box remains ordinary input, and Pi keybindings are never modified.
 
-只读预览和 Space 操作菜单统一使用双线边框，边框颜色跟随当前主题；主文件树及主对话布局不变。
+- Translation scope: tree title and status, bottom hint, width hints, action menu, help table, preview hints, command feedback, and errors defined by this extension. Command/shortcut registration descriptions use fixed bilingual text; the Pi main UI does not switch along.
+- **File names, paths, and file contents are never translated**; copy, reference, and external editor actions still use the raw path. Low-level system/third-party errors keep their original diagnostics, sanitized for display.
+- Switching redraws immediately without rebuilding the tree, ScrollView, or main editor, without re-reading directories or file contents, and without changing tree selection, confirmed width, focus, or drafts. The help table re-wraps in the new language; the scroll offset is kept and clamped to the valid range.
 
-### 只读预览
+The language preference is stored separately in **`<agent-dir>/file-sidebar.json`**, by default `~/.pi/agent/file-sidebar.json`; it honors `PI_CODING_AGENT_DIR` and never touches Pi's `settings.json`, `keybindings.json`, project settings, or installed copies. For example:
 
-只在 Enter、双击或菜单明确选择时读取正文。支持 UTF-8，显示路径、行号、语法高亮、滚动与截断说明。实际读取上限 **512 KiB**，显示上限 **5000 行**；末尾截断的 UTF-8 字符不会变成乱码。空文件、二进制、非 UTF-8、权限和消失错误有说明。预览不写文件、不改变草稿。Esc 或点击底部提示行关闭，返回原树选择。
+```json
+{ "language": "en" }
+```
 
-### 复制与引用
+It is remembered across projects, sessions, and `/reload` within the same agent directory; off/on does not reset it. Startup is read-only; only an explicit switch writes. Saves go through a serialized queue using an atomic same-directory temp-file replace, preserving other JSON fields. Normal reload/session replacement waits for in-flight saves. There is no watcher or polling: other running Pi instances do not follow automatically; among multiple processes the last successful save wins and is read at the next startup or reload.
 
-复制使用 Pi 公开 `copyToClipboard()`，保留路径原始字符，不复用清洗后的 UI 字符串。目录和链接可以复制。
+A missing configuration defaults to Chinese without auto-creating the file. An invalid configuration warns and temporarily uses Chinese; symlinks, non-regular files, and configs over 16 KiB are rejected. On save failure, a warning is shown, the interface keeps the chosen language for this session, but the next load follows the disk contents; a corrupted JSON is never overwritten for the sake of saving — fix this extension's config first and retry.
 
-引用在动作前重新验证普通文件，通过 `pasteToEditor()` 插入当前光标，并在两侧加边界空格。例如 `@src/a.ts`、`@"docs/design notes.md"`。含引号/反斜杠等路径采用 JSON 字符串编码，可逆；控制字符路径明确拒绝引用，可改用复制。目录和符号链接不作为文件引用插入。
+## Key Help
 
-引用只是草稿文本，不是附件上传；本扩展不读取正文注入上下文，也不调用发送或模型 API。
+Press `h` while the tree has focus to show the full reference as a two-column “Key | Action” table, grouped by tree navigation, file actions, width adjustment, action menu, and read-only preview; the action menu and main conversation paging keys show the current Pi configuration. At the default width the compact bottom hint is `Enter View · Space Menu · h Help` (Chinese: `Enter 预览 · Space 操作 · h 帮助`); narrow sidebars compress the Enter/Space hints to keep the `h` help entry. `w` remains for width adjustment.
 
-### 外部编辑器
+The help overlay resizes with the terminal (85% of the window), and the table fills the available overlay width. The key column is sized by content while leaving room for the action column; the two columns wrap independently. Column widths are recalculated on window resize; long key names and Chinese descriptions are never horizontally truncated. The header stays fixed; scrolling affects only the group and action rows.
 
-优先级与 Pi 一致：可信项目/用户的 `externalEditor`，然后 `$VISUAL`、`$EDITOR`，最后平台默认（本机为 nano）。设置只读，尊重项目 trust，不创建配置锁或写回迁移。
+Help supports ↑/↓ scrolling, Ctrl+U/Ctrl+D half-pages, PageUp/PageDown paging, Home/End jumps, and the mouse wheel. Press `l` inside the panel to switch language instantly without closing help; press `h`, Esc, Ctrl+C, or click the bottom hint to close and return to the original tree selection without touching the main input draft. In short windows, scroll to see all entries; help is not opened during width adjustment or other blocking modals.
 
-命令解析为程序与独立 argv；支持引号和反斜杠转义，不执行 shell 管道、重定向或变量插值。文件以独立的绝对路径参数打开，不创建 prompt 临时副本。
+## Keyboard Width Adjustment
 
-要求 Pi idle；启动前再次检查状态。先 stop TUI，异步启动进程，再在正常、非零或启动失败路径恢复 TUI。关闭/替换会话先等待被终止的旧编辑器进程结束，旧结果不会启动新上下文的 renderer。
+The default is 32 columns with a 1-column divider, keeping at least 64 columns for the main UI; the default show threshold is **97 columns** and the minimum height is **8 rows**.
 
-**GUI 等待语义：**请配置 `code --wait`、`open -W -n -a TextEdit` 等等待命令。`open -W` 等待 app 退出；没有等待参数时，进程返回只代表启动命令结束，不代表编辑完成。关闭 Pi 不会擅自关闭已经独立启动的 GUI 文稿窗口。
+- With tree focus and no blocking modal, `w` enters width adjustment.
+- ←/→ adjust by 1 column; terminals supporting the extended key protocol can use Shift+←/→ for 4 columns.
+- The candidate range is `24 … min(48, terminal columns − 65)`; if the upper bound is below 24, entry is not allowed.
+- The live preview rebuilds only the extension's own HStack, preserving the main root, editor, tree, and ScrollView, and never reads directories.
+- Enter confirms; Esc restores the width from before entry; both return to tree navigation.
+- Ctrl+C or the activation key cancels and returns to the Pi input box.
+- Unconfirmed values are canceled when leaving the tree, on blocking modals, off, reload, session/mode replacement, or host invalidation.
+- If shrinking the window makes the candidate invisible, the original width is restored first; if the original width still fits, tree focus is kept, otherwise the tree hides and releases focus.
+- off/on keeps the confirmed width, selection, and expansions; reload/new runtime resets to the default 32. Width is never written to persistent config (unlike the language preference).
 
-## 刷新与目录边界
+## File Actions and Security Boundaries
 
-以 `ctx.cwd` 为固定根，异步按层读取，不扫描未展开后代。默认隐藏点项、`.git` 和 `node_modules`。符号链接不自动展开或预览；目录加载和文件动作均重新检查链接/根范围。
+The read-only preview, the Space action menu, and the `h` key help all use a double-line border whose color follows the current theme; the main file tree and main conversation layout are unchanged.
 
-刷新来源：首次显示/展开、手动、重新进入树、成功 write/edit/bash、外部编辑器返回。工具事件只标记 dirty，40ms 去抖；同目录单飞，读取中新 dirty 不丢失。隐藏或折叠的目录暂停主动读取；旧 runtime/已移出节点的结果丢弃。
+### Read-only Preview
 
-**没有 watcher。** 外部修改不保证即时出现，用 r 或重新进入侧栏刷新。侧栏本身不新建、重命名、移动、删除或保存文件；仅用户主动的外部编辑器可以改真实文件。
+File contents are only read on an explicit Enter, double-click, or menu choice. UTF-8 is supported, showing the path, line numbers, syntax highlighting, scrolling, and truncation notes. Reads are capped at **512 KiB** and display at **5000 lines**; a UTF-8 character truncated at the end never turns into mojibake. Empty files, binaries, non-UTF-8, permission, and missing-file errors have explanations. The preview never writes files or modifies drafts. Esc or clicking the bottom hint line closes it and returns to the original tree selection.
 
-## 开发
+### Copy and Reference
 
-保留正式源码、依赖与项目配置。类型检查：
+Copying uses Pi's public `copyToClipboard()` with the raw path characters, never reusing sanitized UI strings. Directories and links can be copied.
+
+References re-validate the regular file before the action, insert at the current cursor via `pasteToEditor()`, and add boundary spaces on both sides. For example `@src/a.ts`, `@"docs/design notes.md"`. Paths containing quotes or backslashes are JSON-string encoded, reversibly; paths with control characters are explicitly rejected for reference — use copy instead. Directories and symlinks are never inserted as file references.
+
+A reference is draft text only, not an attachment upload; this extension never reads file contents into context and never invokes send or model APIs.
+
+### External Editor
+
+Priority matches Pi: trusted project/user `externalEditor`, then `$VISUAL`, `$EDITOR`, and finally the platform default (nano on this machine). Settings are read-only; project trust is respected; no config locks are created and no settings are migrated or written back.
+
+The command is parsed into a program and separate argv; quotes and backslash escapes are supported, but shell pipes, redirection, and variable interpolation are not executed. Files open as a standalone absolute-path argument, and no prompt temp copy is created.
+
+Pi must be idle; state is re-checked right before launch. The TUI is stopped first, the process is launched asynchronously, and the TUI is restored on the normal, non-zero, and launch-failure paths. Closing/replacing a session first waits for the terminated old editor process; old results never start a renderer on a new context.
+
+**GUI wait semantics:** configure waiting commands such as `code --wait` or `open -W -n -a TextEdit`. `open -W` waits for the app to exit; without a wait flag, the process exiting only means the launch command finished, not that editing is done. Closing Pi never forcibly closes GUI document windows that were launched independently.
+
+## Refresh and Directory Boundaries
+
+`ctx.cwd` is the fixed root, read asynchronously layer by layer; unexpanded descendants are never scanned. Dot entries, `.git`, and `node_modules` are hidden by default. Symlinks are never auto-expanded or previewed; directory loads and file actions re-check links/root scope.
+
+Refresh sources: first show/expand, manual refresh, re-entering the tree, successful write/edit/bash, and returning from the external editor. Tool events only mark dirty with a 40ms debounce; per-directory single-flight; new dirty marks during a read are never lost. Hidden or collapsed directories pause active reads; results from stale runtimes or removed nodes are discarded.
+
+**There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above.
+
+## Development
+
+The formal sources, dependencies, and project configuration are kept as-is. Type check:
 
 ```bash
 npm run typecheck
 ```
 
+Targeted automated regressions for help and language switching (native component rendering, simulated host, and temp-directory file tests; not a substitute for real TUI acceptance):
+
+```bash
+./node_modules/.bin/tsc -p tests/tsconfig.json
+node --import tsx --test tests/*.test.ts
+```
+
+Coverage includes the full key table, current Pi menu keys, the adaptive bilingual table with cross-group alignment, long key name/description wrapping without losing content, the fixed header, short windows, scrolling/close and theme redraw; plus `h`/`l` wiring, `w` preservation, bilingual menus/previews/errors, no directory re-reads, preference storage boundaries, serialized saves, off/dispose cancellation, reload/session-replacement races, and non-TUI silence. `tests/` uses its own type-check config and is not part of `npm run typecheck`; storage tests use temp directories and never change the actual language preference.
+
+### Live Acceptance for Language Switching (Not Yet Done)
+
+Temporarily load the source in a separate terminal (registers nothing and does not update the installed copy):
+
+```bash
+pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen
+```
+
+- Leave a draft in the main input box and move the cursor, enter the tree and press `l`, open `h` and press `l` again; confirm the tree/help switches instantly and the draft, cursor, and selection are unchanged after exiting.
+- Check menus, width adjustment, preview, errors, and `/file-sidebar status` in both languages; confirm file names and contents are not translated.
+- Resize the window, scroll the help, and check the fixed header, long English/Chinese description wrapping, the close hint, and that main conversation paging is unaffected.
+- After quick toggles, run off/on, `/reload`, or a new session; confirm the last saved language is restored while width adjustment still resets by its own independent rules.
+- Under an isolated `PI_CODING_AGENT_DIR`, check warnings for corrupted/unwritable configs; do not rewrite real Pi settings just to test. Language switching in a normal directory saves the preference — restore the original language afterwards if needed.
