@@ -4,7 +4,7 @@
 
 Pi 1.4.0 fullscreen 内的原生左侧文件树。右侧保留 Pi 主界面、编辑器和原生对话滚动，不覆盖对话、不运行第二个 renderer。
 
-正式功能已实现，正式 TUI 实机验收尚未完成。此前自动回归通过，但不能替代正式扩展的实机验收。
+正式功能已实现，正式 TUI 实机验收尚未完成。
 
 ## 安装
 
@@ -198,15 +198,6 @@ pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.1.3
 ```bash
 npm run typecheck
 ```
-
-帮助与语言切换的针对性自动回归（原生组件渲染、模拟宿主和临时目录文件测试，不替代真实 TUI 验收）：
-
-```bash
-./node_modules/.bin/tsc -p tests/tsconfig.json
-node --import tsx --test tests/*.test.ts
-```
-
-覆盖完整键位、当前 Pi 菜单键位、中英文自适应表格与跨组对齐、长键名/说明换行不丢内容、固定表头、短窗口、滚动/关闭和主题重绘；以及 `h`/`l` 接线、`w` 保留、双语菜单/预览/错误、无目录重读、偏好存储边界、串行保存、off/dispose 取消、reload/会话替换竞态和非 TUI 静默。`tests/` 使用独立类型检查配置，不包含在 `npm run typecheck` 中；存储测试使用临时目录，不更改实际语言偏好。
 
 ### 语言切换实机验收（尚未完成）
 

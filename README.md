@@ -4,7 +4,7 @@
 
 A native left-side file tree for Pi 1.4.0 fullscreen mode. The Pi main UI, editor, and native conversation scrolling stay on the right; the extension never overlays the conversation and never runs a second renderer.
 
-The feature set is fully implemented, but formal TUI acceptance on a real terminal is not yet complete. Automated regressions pass, but they do not substitute for acceptance testing of the formal extension.
+The feature set is fully implemented, but formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -198,15 +198,6 @@ The formal sources, dependencies, and project configuration are kept as-is. Type
 ```bash
 npm run typecheck
 ```
-
-Targeted automated regressions for help and language switching (native component rendering, simulated host, and temp-directory file tests; not a substitute for real TUI acceptance):
-
-```bash
-./node_modules/.bin/tsc -p tests/tsconfig.json
-node --import tsx --test tests/*.test.ts
-```
-
-Coverage includes the full key table, current Pi menu keys, the adaptive bilingual table with cross-group alignment, long key name/description wrapping without losing content, the fixed header, short windows, scrolling/close and theme redraw; plus `h`/`l` wiring, `w` preservation, bilingual menus/previews/errors, no directory re-reads, preference storage boundaries, serialized saves, off/dispose cancellation, reload/session-replacement races, and non-TUI silence. `tests/` uses its own type-check config and is not part of `npm run typecheck`; storage tests use temp directories and never change the actual language preference.
 
 ### Live Acceptance for Language Switching (Not Yet Done)
 
