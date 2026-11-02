@@ -11,6 +11,11 @@ import { SidebarHelp } from "./help.ts";
 import { describeError, getMessages, isLanguage, SidebarError, type Language } from "./i18n.ts";
 import { saveLanguage } from "./language.ts";
 
+// 按住 ↑/↓ 的加速档位（毫秒）：1.1s 后每次跳 2 项，2.6s 后每次跳 3 项。
+// 只依赖终端自动重复，不额外监听 timer；松开后下一次按键的间隔超出窗口即复位。
+export const REPEAT_STEP_AFTER = [1100, 2600] as const;
+export const REPEAT_RESET_AFTER = 450;
+
 export class FileSidebar {
   readonly host: SidebarHost;
   readonly tree: FileTree;
@@ -21,6 +26,7 @@ export class FileSidebar {
   private frame: { path: string; marker: number }[] = [];
   private pressed?: string;
   private clickedPath?: string;
+  private held?: { key: "up" | "down"; since: number; last: number };
   private wasFocused = false;
   private disposed = false;
   private acting = false;
@@ -147,6 +153,7 @@ export class FileSidebar {
 
   private currentAction(id: number) { return id === this.actionGeneration && !this.disposed && this.host.alive && this.host.visible; }
   private cancelActions() {
+    this.held = undefined;
     if (!this.acting && !this.closeModal) return;
     this.actionGeneration++; this.acting = false;
     const close = this.closeModal; this.closeModal = undefined; close?.();
@@ -303,8 +310,8 @@ export class FileSidebar {
     else if (matchesKey(data, "h")) void this.help();
     else if (matchesKey(data, "l") && !this.acting) void this.changeLanguage(this.language === "zh" ? "en" : "zh");
     else if (data === "w") this.host.beginResize();
-    else if (matchesKey(data, "up")) this.tree.move(-1);
-    else if (matchesKey(data, "down")) this.tree.move(1);
+    else if (matchesKey(data, "up")) this.move(-1, "up");
+    else if (matchesKey(data, "down")) this.move(1, "down");
     else if (matchesKey(data, "home")) this.tree.move(-Infinity);
     else if (matchesKey(data, "end")) this.tree.move(Infinity);
     else if (matchesKey(data, "ctrl+u")) this.tree.move(-Math.max(1, Math.floor(this.scroll.viewportHeight / 2)));
@@ -320,6 +327,16 @@ export class FileSidebar {
     else if (data === "e") void this.external();
     else if (data === ".") this.tree.toggleHidden();
     else if (data === "r") void this.tree.refresh();
+  }
+
+  // 只加速连续的同一方向按键；换向、间隔过长或离开侧栏都从 1 项重新开始。
+  private move(direction: -1 | 1, key: "up" | "down") {
+    const now = performance.now(), held = this.held;
+    const next = !held || held.key !== key || now - held.last > REPEAT_RESET_AFTER
+      ? { key, since: now, last: now } : { key, since: held.since, last: now };
+    this.held = next;
+    const duration = now - next.since;
+    this.tree.move(direction * (1 + REPEAT_STEP_AFTER.filter((threshold) => duration >= threshold).length));
   }
 
   private wheel(event: TuiMouseEvent, target: Component) {
@@ -349,7 +366,7 @@ export class FileSidebar {
     const pending = this.externalDone;
     if (!this.disposed) {
       this.disposed = true; this.cancelActions(); this.tree.dispose(); this.scroll.setScrollbar("hidden"); this.host.dispose();
-      this.frame = []; this.cache = undefined; this.pressed = undefined; this.clickedPath = undefined;
+      this.frame = []; this.cache = undefined; this.pressed = undefined; this.clickedPath = undefined; this.held = undefined;
     }
     // 会话替换等待旧编辑器和已确认的语言写入；旧结果不能操作新 renderer 或覆盖新偏好。
     return Promise.allSettled([this.languageSave, pending]).then(() => {});

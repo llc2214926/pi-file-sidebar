@@ -90,7 +90,8 @@ The default activation key is **Ctrl+Shift+E**. User keybindings are never modif
 
 | Input in tree | Behavior |
 |---|---|
-| ↑ / ↓, Home / End | Move selection |
+| ↑ / ↓ | Move selection; holding ↑/↓ accelerates (2 rows per repeat after ~1.1s, 3 rows after ~2.6s) |
+| Home / End | Select the first / last item |
 | → / ← | Expand directory; collapse directory or go to parent |
 | Ctrl+U / Ctrl+D | Half-page movement inside the tree |
 | Enter | Expand/collapse directories; read-only preview for regular files |
