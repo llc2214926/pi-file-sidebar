@@ -8,6 +8,40 @@ Pi 1.4.0 fullscreen 内的原生左侧文件树。右侧保留 Pi 主界面、�
 
 ## 安装
 
+### 远程安装（两种方式）
+
+**方式 A：git 源（Pi 标准流程）**
+
+```bash
+pi install git:github.com/llc2214926/pi-file-sidebar
+```
+
+Pi 会把整个仓库克隆到 `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar`（设置 `PI_CODING_AGENT_DIR` 时用对应目录）并写入 `settings.json` 注册。目录保留 `.git`、`scripts/`、`tsconfig.json`、`package-lock.json` 等全部克隆内容，因此更新可用：`pi update git:github.com/llc2214926/pi-file-sidebar` 会 fetch 并对账到配置的 ref。安装需要 git 和一个 npm 包管理器（运行时本身零依赖，只声明宿主 peerDependencies）。
+
+**方式 B：remote-install.sh（GitHub Release 纯净包）**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/llc2214926/pi-file-sidebar/refs/heads/master/scripts/remote-install.sh | bash
+# 或指定版本
+bash remote-install.sh 0.1.3
+```
+
+脚本从 Release 下载 `pi-file-sidebar-<版本>.tgz`（即 `npm pack` 白名单产物：仅 `extensions/`、`src/`、`package.json`、`README*`、`LICENSE`），先用 `pi install` 注册同一 git 源，再原子地把克隆目录替换为纯净包。最终目录只包含扩展运行所需文件 —— 没有 `.git`、`scripts/`、`tsconfig.json`。
+
+**差异一览**
+
+| | A：`pi install git:…` | B：`remote-install.sh` |
+|---|---|---|
+| 安装目录内容 | 完整仓库克隆 | 仅打包白名单文件 |
+| 磁盘占用 | 仓库 + `.git`（约 420 KiB） | 仅包文件（约 180 KiB） |
+| `pi update` | 可用（fetch 配置的 ref） | **不可用** —— 无 `.git`；升级需重跑脚本并传新版本 |
+| 需要 GitHub Release tgz | 否 | 是（`v<版本>` 的 Release 附件） |
+| 其他步骤 | 无 | 校验 `curl`/`tar`/`node`/`pi`、验证 Pi 1.4.0 与包内容，失败可回滚的原子替换 |
+
+两种方式在 Pi 设置中注册的是同一个源字符串 `git:github.com/llc2214926/pi-file-sidebar`，占用同一个位置：先后安装会互相替换。任一方式安装后，在当前 Pi 执行 `/reload` 或重启 Pi。两者都只写 Pi 自己的 `settings.json` packages 项，不改 keybindings 和项目设置。
+
+### 本地发布（源码仓库）
+
 本地发布使用 `npm pack` 生成版本包，解包到 Pi 的独立安装目录后注册全局包。在源码仓库执行：
 
 ```bash

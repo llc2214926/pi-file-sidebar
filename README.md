@@ -8,6 +8,40 @@ The feature set is fully implemented, but formal TUI acceptance on a real termin
 
 ## Installation
 
+### Remote installation (two options)
+
+**Option A: git source (standard Pi flow)**
+
+```bash
+pi install git:github.com/llc2214926/pi-file-sidebar
+```
+
+Pi clones the whole repository to `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar` (or the `PI_CODING_AGENT_DIR` equivalent) and registers it in `settings.json`. The directory keeps `.git`, `scripts/`, `tsconfig.json`, `package-lock.json`, etc. — everything from a normal `git clone` — which is why updates work: `pi update git:github.com/llc2214926/pi-file-sidebar` fetches and reconciles the checkout. Requires git and an npm package manager to install (the runtime itself has zero dependencies; only host peerDependencies).
+
+**Option B: remote-install.sh (clean package from the GitHub Release)**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/llc2214926/pi-file-sidebar/refs/heads/master/scripts/remote-install.sh | bash
+# or with an explicit version
+bash remote-install.sh 0.1.3
+```
+
+The script downloads the released `pi-file-sidebar-<version>.tgz` (the `npm pack` whitelist: only `extensions/`, `src/`, `package.json`, `README*`, `LICENSE`), registers the same git source via `pi install`, then atomically replaces the clone directory with the clean package. The final directory contains only the files the extension actually needs — no `.git`, no `scripts/`, no `tsconfig.json`.
+
+**Differences at a glance**
+
+| | A: `pi install git:…` | B: `remote-install.sh` |
+|---|---|---|
+| Install directory content | Full repository clone | Clean packed files only |
+| Disk footprint | Repository + `.git` (~420 KiB) | Package files only (~180 KiB) |
+| `pi update` | Works (fetches the configured ref) | **Does not work** — no `.git`; re-run the script with a new version to upgrade |
+| Needs a GitHub Release tgz | No | Yes (`v<version>` release asset) |
+| Other steps | None | Checks `curl`/`tar`/`node`/`pi`, verifies Pi 1.4.0 and package content, atomic replace with rollback on failure |
+
+Both register the identical source string `git:github.com/llc2214926/pi-file-sidebar` in Pi settings, so they occupy the same slot: installing one after the other replaces the previous copy. After either installation, run `/reload` in the current Pi or restart Pi. Both write only Pi's own `settings.json` packages entry; neither touches keybindings or project settings.
+
+### Local publishing (from the source repository)
+
 Local publishing uses `npm pack` to build a versioned package, unpacks it into Pi's standalone install directory, and registers it as a global package. Run from the source repository:
 
 ```bash
