@@ -23,6 +23,7 @@ artifacts/
 
 # Historical test and acceptance material
 test/
+tests/
 evidence/
 package-lock.json
 AGENTS.md

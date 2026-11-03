@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.ZH.md)
 
-A native left-side file tree for Pi 1.4.0 fullscreen mode. The Pi main UI, editor, and native conversation scrolling stay on the right; the extension never overlays the conversation and never runs a second renderer.
+A native left-side file tree for Pi 1.4.0 fullscreen mode. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
 The feature set is fully implemented, but formal TUI acceptance on a real terminal is not yet complete.
 
@@ -75,16 +75,18 @@ The current development/testing baseline is Pi **1.4.0**, Node **24.22.2**, macO
 
 | Command | Behavior |
 |---|---|
-| `/file-sidebar`, `/file-sidebar focus` | Show the tree and enter tree focus |
-| `/file-sidebar on` | Show without taking focus |
+| `/file-sidebar`, `/file-sidebar focus` | Show the tree and enter tree focus; use a temporary left overlay in narrow windows |
+| `/file-sidebar on` | Enable automatic display without taking focus; stays hidden in narrow windows |
 | `/file-sidebar off` | Close, cancel unconfirmed actions/modals, and restore the main UI |
 | `/file-sidebar refresh` | Refresh loaded, visible, expanded directories; other dirty directories are handled when re-expanded |
-| `/file-sidebar width 32` | Set this runtime's width; integers 24–48; temporarily hidden when the window is too small |
+| `/file-sidebar width 32` | Set this runtime's width; integers 24–48; narrow windows hide the docked tree and clamp an open temporary overlay to fit |
 | `/file-sidebar lang zh`, `/file-sidebar lang en` | Switch the whole sidebar between Chinese and English and save the choice |
 | `/file-sidebar lang` | Show the current language and switching usage |
 | `/file-sidebar status` | Mode/mount or hide reason, width, focus, cache, pending reads, and current language |
 
 The default activation key is **Ctrl+Shift+E**. User keybindings are never modified; if your terminal cannot distinguish that key or another extension conflicts with it, use the commands. The same shortcut inside the tree returns to the Pi input box.
+
+Below the docked display threshold (97 columns at the default width), `/file-sidebar`, `/file-sidebar focus`, and Ctrl+Shift+E open a temporary overlay on the left. The conversation keeps its full layout width behind it. Esc, Ctrl+C, the activation key, or inserting a reference returns to the editor and removes the overlay. Menus, previews, and help return to the tree first. Enlarging the window restores the usual side-by-side layout. A focused docked tree switches to the temporary overlay when the window shrinks; an unfocused docked tree hides until you open it manually again. If help, the action menu, or a preview is open while the window shrinks, the modal is not cancelled: the tree becomes a temporary overlay that stays hidden until the modal closes, then reappears (or re-docks once the window is wide again). If the window drops below **26 columns × 8 rows**, the overlay closes and an open modal is still cancelled. The overlay clamps its displayed width to leave a divider and at least one conversation column visible, without changing the confirmed width.
 
 ## Keyboard and Mouse
 
@@ -104,9 +106,9 @@ The default activation key is **Ctrl+Shift+E**. User keybindings are never modif
 | w | Enter keyboard width adjustment |
 | h | Open the full key help |
 | l | Toggle sidebar Chinese/English and save the choice (also works in help) |
-| Esc / Ctrl+C | Return to the original Pi input object; drafts are kept and the agent is not interrupted |
+| Esc / Ctrl+C | Return to the original Pi input object and retract a temporary overlay; drafts are kept and the agent is not interrupted |
 
-Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. The native scrollbar handles scroll dragging; files and the divider are not draggable.
+Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. The scrollbar supports dragging; files and the divider are not draggable.
 
 **PageUp/PageDown policy:** with normal tree focus, Pi's main conversation paging is preserved; the tree uses Ctrl+U/Ctrl+D. In the preview or help panel that captures focus, PageUp/PageDown control that panel, not the main conversation. The original behavior of Tab, Ctrl+B, etc. in the main input box is unchanged; undefined plain keys inside the tree are never written to the main draft.
 
@@ -146,16 +148,16 @@ Help supports ↑/↓ scrolling, Ctrl+U/Ctrl+D half-pages, PageUp/PageDown pagin
 
 ## Keyboard Width Adjustment
 
-The default is 32 columns with a 1-column divider, keeping at least 64 columns for the main UI; the default show threshold is **97 columns** and the minimum height is **8 rows**.
+The default is 32 columns with a 1-column divider. Docked display keeps at least 64 columns for the main UI; its default show threshold is **97 columns**. Both docked and temporary display require at least **8 rows**.
 
 - With tree focus and no blocking modal, `w` enters width adjustment.
 - ←/→ adjust by 1 column; terminals supporting the extended key protocol can use Shift+←/→ for 4 columns.
-- The candidate range is `24 … min(48, terminal columns − 65)`; if the upper bound is below 24, entry is not allowed.
-- The live preview rebuilds only the extension's own HStack, preserving the main root, editor, tree, and ScrollView, and never reads directories.
+- The docked candidate range is `24 … min(48, terminal columns − 65)`; a temporary overlay uses `24 … min(48, terminal columns − 2)`. If the upper bound is below 24, entry is not allowed.
+- The live preview preserves the main root, editor, tree, and ScrollView, and never reads directories. Docked layout changes rebuild only the extension's own HStack.
 - Enter confirms; Esc restores the width from before entry; both return to tree navigation.
 - Ctrl+C or the activation key cancels and returns to the Pi input box.
 - Unconfirmed values are canceled when leaving the tree, on blocking modals, off, reload, session/mode replacement, or host invalidation.
-- If shrinking the window makes the candidate invisible, the original width is restored first; if the original width still fits, tree focus is kept, otherwise the tree hides and releases focus.
+- If shrinking the window makes a docked candidate invisible, the original width is restored first; if the original width still fits, tree focus is kept, otherwise the tree hides and releases focus. A temporary overlay cancels resizing if the candidate no longer fits; its display clamps to the window and closes below 26 columns or 8 rows.
 - off/on keeps the confirmed width, selection, and expansions; reload/new runtime resets to the default 32. Width is never written to persistent config (unlike the language preference).
 
 ## File Actions and Security Boundaries
@@ -198,7 +200,19 @@ The formal sources, dependencies, and project configuration are kept as-is. Type
 
 ```bash
 npm run typecheck
+./node_modules/.bin/tsc -p tests/tsconfig.json
+node --import tsx --test tests/*.test.ts
 ```
+
+The automated narrow-window regressions exercise Pi 1.4.0's renderer and input routing with an in-memory terminal. They do not replace real-terminal acceptance.
+
+### Live Acceptance for Narrow Windows (Not Yet Done)
+
+- At 80×24, confirm the tree starts hidden. Open it with the command and shortcut; check the conversation remains full width behind the left overlay. Esc, Ctrl+C, and the shortcut must retract it and preserve the original draft/cursor.
+- Open help, the menu, and a file preview; close each back to the same tree selection, then leave the tree. Insert a reference and confirm it returns to the unobstructed editor without sending.
+- Scroll, click after scrolling, double-click a file, drag the scrollbar, and check wheel boundaries. PageUp/PageDown must still page the conversation under ordinary tree focus.
+- Test 26/40/80/96/97/120 columns, short windows, width confirmation/cancel, off/on, reload, and another extension taking over the root. Enlarging restores the docked layout; a focused docked tree shrinks into the floating overlay, an unfocused one hides. Test both languages and wide file names.
+- With help, the menu, or a preview open, shrink and then enlarge the window: the modal must not be cancelled, and closing it returns to the floating tree or the docked layout.
 
 ### Live Acceptance for Language Switching (Not Yet Done)
 

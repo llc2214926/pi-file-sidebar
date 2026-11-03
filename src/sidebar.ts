@@ -22,6 +22,8 @@ export class FileSidebar {
   private rows: Component & { focused: boolean };
   private scroll: ScrollView;
   private panel: VStack;
+  private floatingScrollbar?: { top: number; size: number; travel: number; max: number };
+  private scrollbarGrab?: number;
   private cache?: { key: string; lines: string[] };
   private frame: { path: string; marker: number }[] = [];
   private pressed?: string;
@@ -59,7 +61,10 @@ export class FileSidebar {
         : [displayText(relative(this.tree.root, this.tree.selected) || "."), visibleWidth(this.texts.footer) <= width ? this.texts.footer : this.texts.compactFooter]), basis: 2, shrink: 0 },
     ]);
     this.panel.handleMouse = (event) => this.wheel(event, this.panel);
-    this.host = new SidebarHost(ctx, this.panel, this.rows, () => this.hostChanged());
+    this.host = new SidebarHost(ctx, this.panel, this.rows, () => this.hostChanged(), {
+      render: (width) => this.renderFloating(width), invalidate: () => this.panel.invalidate(),
+      handleMouse: (event) => this.floatingMouse(event),
+    });
   }
 
   get scrollTop() { return this.scroll.scrollTop; }
@@ -69,6 +74,10 @@ export class FileSidebar {
     if (this.disposed) return;
     const visible = this.host?.visible ?? false, focused = this.host?.focused ?? false;
     if (!visible) this.cancelActions();
+    if (!focused || this.host.resizing) this.held = undefined;
+    if (!visible || !this.host.floating) {
+      this.scrollbarGrab = undefined; this.floatingScrollbar = undefined; this.scroll.setScrollbarActive(false);
+    }
     this.tree.setActive(visible && !this.externalRunning);
     this.scroll.setScrollbar(visible && !this.externalRunning ? "auto" : "hidden");
     if (focused && !this.wasFocused) {
@@ -92,6 +101,46 @@ export class FileSidebar {
     });
     this.cache = { key, lines }; return lines;
   }
+  // Pi 1.4.0 的 overlay 只调用 render(width)，不分配 VStack/ScrollView 的视口高度。
+  // 复用原树、表头/页脚和 ScrollView 状态，给临时浮层提供有界窗口。
+  private renderFloating(width: number): string[] {
+    const height = Math.max(1, (this.host.tui?.terminal.rows ?? 8) - 4);
+    const lines = this.rows.render(width);
+    this.scroll.updateLayout(lines.length, height, () => this.host.redraw());
+    const size = Math.min(height, Math.max(2, Math.round(height * height / Math.max(1, lines.length))));
+    const max = Math.max(0, lines.length - height), travel = height - size;
+    const top = max ? Math.round(this.scroll.scrollTop / max * travel) : 0;
+    this.floatingScrollbar = max ? { top, size, travel, max } : undefined;
+    const body = Array.from({ length: height }, (_, row) => {
+      const line = lines[row + this.scroll.scrollTop] ?? "";
+      if (!this.scroll.isScrollbarVisible) return line;
+      const thumb = row >= top && row < top + size;
+      return truncateToWidth(line, width - 1, "", true) + (thumb
+        ? this.scroll.scrollbarThumbStyle(this.scroll.isScrollbarActive ? "█" : "┃") : this.scroll.scrollbarTrackStyle("│"));
+    });
+    return [...this.panel.children[0]!.render(width), ...body, ...this.panel.children[2]!.render(width)];
+  }
+
+  private floatingMouse(event: TuiMouseEvent) {
+    if (event.type === "wheel") return this.wheel(event, this.panel);
+    if (!this.host.canInteract || this.host.resizing) return { handled: true };
+    const bar = this.floatingScrollbar, y = event.y - 2;
+    const overBar = !!bar && event.x === event.width - 1 && y >= 0 && y < this.scroll.viewportHeight;
+    this.scroll.setScrollbarActive(overBar || this.scrollbarGrab !== undefined);
+    if (bar && event.button === "left" && (overBar || this.scrollbarGrab !== undefined)) {
+      if (event.type === "press") this.scrollbarGrab = y >= bar.top && y < bar.top + bar.size ? y - bar.top : Math.floor(bar.size / 2);
+      if ((event.type === "press" || event.type === "drag") && this.scrollbarGrab !== undefined) {
+        const position = Math.max(0, Math.min(bar.travel, y - this.scrollbarGrab));
+        this.scroll.scrollTo(bar.travel ? Math.round(position / bar.travel * bar.max) : 0);
+        return { handled: true, capture: true, render: true };
+      }
+      if (event.type === "release") { this.scrollbarGrab = undefined; return { handled: true, capture: false, render: true }; }
+      return { handled: true };
+    }
+    if (y < 0 || y >= this.scroll.viewportHeight || event.x >= event.width) return { handled: true };
+    return this.mouse({ ...event, y: y + this.scroll.scrollTop });
+  }
+
   private revealSelection() {
     if (!this.host?.visible) return;
     const rows = this.tree.rows(), index = rows.findIndex((row) => row.node.path === this.tree.selected);
