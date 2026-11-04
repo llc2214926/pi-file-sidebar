@@ -38,6 +38,14 @@ export default function fileSidebarExtension(pi: ExtensionAPI) {
     description: "切换工作目录并保留会话 / Switch working directory, keep session",
     handler: async (args, ctx) => { await directoryCommands?.command(args, ctx); },
   });
+  pi.registerCommand("cd-new", {
+    description: "切换工作目录并新建会话 / Switch working directory, start fresh",
+    handler: async (args, ctx) => { await directoryCommands?.command(args, ctx, "new"); },
+  });
+  pi.registerCommand("cd-resume", {
+    description: "切换目录后选择恢复会话（同目录直接恢复） / Switch directory, then open resume",
+    handler: async (args, ctx) => { await directoryCommands?.command(args, ctx, "resume"); },
+  });
   pi.registerCommand("file-sidebar", {
     description: "文件树 / File sidebar: focus/on/off/refresh/width/lang/status/cd",
     handler: async (args, ctx) => {

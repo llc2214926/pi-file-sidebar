@@ -1,4 +1,4 @@
-# 0.2.0 deployment rollback / 部署回滚
+# 0.2.1 deployment rollback / 部署回滚
 
 **操作手册，不是已执行记录。源代码开发不自动安装、改注册或停用旧扩展。**
 
@@ -21,7 +21,7 @@
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 test -f "$agent_dir/local-packages/pi-file-sidebar/0.1.3/package.json"
 # 上一步不成功则停止，先从核实过的备份恢复到一个空的独立目录。
-pi remove "$agent_dir/local-packages/pi-file-sidebar/0.2.0"
+pi remove "$agent_dir/local-packages/pi-file-sidebar/0.2.1"
 pi install "$agent_dir/local-packages/pi-file-sidebar/0.1.3"
 pi list
 ```
@@ -55,7 +55,7 @@ mv -n "$agent_dir/extensions/cd-picker.ts.disabled" "$agent_dir/extensions/cd-pi
 
 ### Revert a local installation
 
-Finish any directory switch/editor operation first. Verify the old 0.1.3 directory is intact. The commands above remove the default local 0.2.0 registration, register the old version, and list registrations. Stop if any command fails. If `pi list` shows another source or resource filters, use that actual source instead. Do not delete installation directories or recursively overlay different versions. Git/clean-package installs need the corresponding verified old package and original registration, without changing unrelated packages or project settings.
+Finish any directory switch/editor operation first. Verify the old 0.1.3 directory is intact. The commands above remove the default local 0.2.1 registration, register the old version, and list registrations. Stop if any command fails. If `pi list` shows another source or resource filters, use that actual source instead. Do not delete installation directories or recursively overlay different versions. Git/clean-package installs need the corresponding verified old package and original registration, without changing unrelated packages or project settings.
 
 Once the new package will no longer load, restore `cd-picker.ts.disabled` with the no-overwrite `mv -n` command above, only if the destination does not exist and the source is verified. If needed, copy the backup to an absent destination rather than overwriting a live extension. Restart Pi or enter `/reload` in a valid interactive Pi session (not `pi /reload` in a shell). Check for duplicate `/cd` registrations, open the old picker/sidebar, and smoke-test a disposable session before declaring rollback successful.
 

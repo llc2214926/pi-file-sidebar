@@ -4,7 +4,7 @@
 
 A native left-side file tree for Pi 1.4.0 fullscreen mode. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.2.0 also integrates `/cd`: switch the working directory while retaining the current session. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.2.1 provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -23,7 +23,7 @@ Pi clones the whole repository to `~/.pi/agent/git/github.com/llc2214926/pi-file
 ```bash
 curl -fsSL https://raw.githubusercontent.com/llc2214926/pi-file-sidebar/refs/heads/master/scripts/remote-install.sh | bash
 # or with an explicit version
-bash remote-install.sh 0.1.3
+bash remote-install.sh 0.2.1
 ```
 
 The script downloads the released `pi-file-sidebar-<version>.tgz` (the `npm pack` whitelist: only `extensions/`, `src/`, `package.json`, `README*`, `LICENSE`), registers the same git source via `pi install`, then atomically replaces the clone directory with the clean package. The final directory contains only the files the extension actually needs — no `.git`, no `scripts/`, no `tsconfig.json`.
@@ -62,7 +62,7 @@ The script requires the development dependencies to be installed (run `npm insta
 An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.2.0
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.2.1
 ```
 
 The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.
@@ -84,6 +84,8 @@ The current development/testing baseline is Pi **1.4.0**, Node **24.22.2**, macO
 | `/file-sidebar lang` | Show the current language and switching usage |
 | `/cd`, `/file-sidebar cd` | Open the same centered floating directory picker; keep this session when switching |
 | `/cd <encoded-path>`, `/file-sidebar cd <encoded-path>` | Switch directly; encode the whole path with `encodeURIComponent` |
+| `/cd-new [encoded-path]` | Pick a directory (or switch directly) and start an empty session; current directory: same as `/new` |
+| `/cd-resume [encoded-path]` | Pick a directory (or switch directly), start an empty session, then open native `/resume`; current directory: `/resume` only, no `/new` |
 | `/file-sidebar status` | Mode/mount or hide reason, width, focus, cache, pending reads, and current language |
 
 The default activation key is **Ctrl+Shift+E**. User keybindings are never modified; if your terminal cannot distinguish that key or another extension conflicts with it, use the commands. The same shortcut inside the tree returns to the Pi input box.
@@ -120,11 +122,27 @@ Press `r` from any browsed directory to return to the workspace: reset to one co
 
 The picker reads only entered directory levels asynchronously. It does not recurse, watch, or follow symlink entries. Loading, empty-directory and read-error states are distinct. It uses the sidebar language; `l` navigates here, not language switching. Names and paths are sanitized for display, not translated or changed on disk.
 
-Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-sidebar cd %2FUsers%2Fme%2FMy%20Project`. Encode the whole path once with `encodeURIComponent`; malformed encoding is rejected. Relative paths resolve against the current `ctx.cwd`; `~` and `~/…` are supported. Explicit targets are resolved with `realpath` (including symlinks) and must be directories with read/execute access. Picking the current real directory gives a no-op notice. No shell is invoked.
+Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-sidebar cd %2FUsers%2Fme%2FMy%20Project`. Encode the whole path once with `encodeURIComponent`; malformed encoding is rejected. Relative paths resolve against the current `ctx.cwd`; `~` and `~/…` are supported. Explicit targets are resolved with `realpath` (including symlinks) and must be directories with read/execute access. For `/cd`, picking the current real directory gives a no-op notice; `/cd-new` and `/cd-resume` follow the same-directory rules below. All three commands share the picker and path encoding. No shell is invoked.
 
-### Session and failure semantics
+### Start fresh or resume
 
-- Requires **Pi 1.4.0 TUI**, persistence, idle processing, no queued messages, and no blocking modal/external editor/width adjustment. `/cd` also works in regular TUI mode, where the sidebar itself stays hidden. Non-TUI modes are silent. Repeated requests share one in-flight lock.
+| Command | Different real directory | Current real directory (including aliases/symlinks) |
+|---|---|---|
+| `/cd` | Keep the current session/history and restore draft text | Notice only |
+| `/cd-new` | New session ID and empty history in the target directory | Native `newSession()`, equivalent to `/new` |
+| `/cd-resume` | New empty session in the target directory, then native `/resume` picker | Open native `/resume` directly; do not create or replace a session first |
+
+The fresh commands do not copy the old conversation, branches, summaries, session name, extension entries, parent-session link, or draft into a different directory. They do not archive or modify the original session file; it remains available for normal recovery. New workspace resources still load under Pi's trust rules. No session is automatically selected for resume: choose one in Pi's native picker. Cancelling that picker after a cross-directory switch leaves the new empty session active; cancelling it in the same directory keeps the original session. Cancelling the directory picker does neither.
+
+Pi 1.4.0's extension `newSession()` API cannot take a cwd. Cross-directory fresh commands therefore create a private, exclusive JSONL containing only a new session header and pass it to `switchSession()`; host lifecycle events label this replacement `resume`, although its ID and conversation are new. Default storage follows the target directory; explicitly configured storage stays in place. Same-directory `/cd-new` uses `newSession()` directly, without a staging file. Cross-directory switching requires persistence; same-directory new/resume also works with an in-memory session.
+
+`/cd-resume` invokes the current host editor's registered resume action, not `sendUserMessage("/resume")` (which would not dispatch that built-in command). Pi owns the list, search, scope, rename/delete controls and subsequent selection/cancellation. If a custom editor does not expose the native action or a modal/busy state blocks it, the extension reports a warning/error instead of sending text to the model. After a successful cross-directory takeover, failure to open the list leaves the new session active; return to the main editor and run `/resume` manually.
+
+All directory commands require **Pi 1.4.0 TUI**, idle processing, no queued messages, and no blocking modal/external editor/width adjustment. They work in regular TUI too, where the sidebar stays hidden; non-TUI modes are silent. They share one in-flight directory-picker/switch lock. New runtime creation resets sidebar width to **32** and keeps successfully saved language preferences. A cancelled or catchable failed cross-directory takeover quarantines the staged empty session as `.cd-abandoned`, without touching the original. The fatal-runtime limitation below applies to fresh switching too; it is not a promise of automatic UI rollback.
+
+### Existing `/cd` session and failure semantics
+
+- `/cd` additionally requires session persistence.
 - The menu closes and returns focus before sending `/file-sidebar cd …` with explicit `expandPromptTemplates: true`. This is command dispatch, not a chat prompt; it neither submits the draft nor asks the model to change directories.
 - A private, exclusively created JSONL snapshot retains the session ID, header metadata, all entries/branches, and active leaf. A non-model `cd-picker` marker records `{ from, to }`. Default session storage moves to the target's session directory; an explicitly configured session directory is retained. This does **not** resume the target project's previous session.
 - Pi replaces the runtime and reloads cwd-bound resources (including AGENTS.md) under its normal trust rules. The old sidebar/editor runtime is disposed; the new tree uses the new root and width **32**. Successfully saved language preferences survive. This is different from leaving tree focus, which preserves the original editor object.
@@ -135,7 +153,7 @@ Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-s
 
 ### Upgrading from the standalone cd-picker
 
-Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.2.0, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. See [rollback-steps.md](rollback-steps.md) in the source repository for rollback steps.
+Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.2.1, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. See [rollback-steps.md](rollback-steps.md) in the source repository for rollback steps.
 
 ## Keyboard and Mouse
 
@@ -232,7 +250,7 @@ Copying uses Pi's public `copyToClipboard()` with the raw path characters, never
 
 References re-validate the regular file before the action, insert at the current cursor via `pasteToEditor()`, and add boundary spaces on both sides. For example `@src/a.ts`, `@"docs/design notes.md"`. Paths containing quotes or backslashes are JSON-string encoded, reversibly; paths with control characters are explicitly rejected for reference — use copy instead. Directories and symlinks are never inserted as file references.
 
-A reference is draft text only, not an attachment upload; file actions never read contents into context or submit the draft. The only `sendUserMessage` call is the explicit directory-menu command bridge above, with command expansion enabled; no model API is called.
+A reference is draft text only, not an attachment upload; file actions never read contents into context or submit the draft. The only `sendUserMessage` call is the explicit directory-menu command bridge above, with command expansion enabled; the native resume action uses no message bridge and no model API is called.
 
 ### External Editor
 
@@ -250,7 +268,7 @@ Pi must be idle; state is re-checked right before launch. The TUI is stopped fir
 
 Refresh sources: first show/expand, manual refresh, re-entering the tree, successful write/edit/bash, and returning from the external editor. Tool events only mark dirty with a 40ms debounce; per-directory single-flight; new dirty marks during a read are never lost. Hidden or collapsed directories pause active reads; results from stale runtimes or removed nodes are discarded.
 
-**There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above. Explicit `/cd` actions additionally write and archive Pi session files as described above; they do not move project files.
+**There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above. Explicit directory commands additionally write Pi session files as described above; only history-preserving `/cd` archives the original, and none moves project files.
 
 ## Development
 
@@ -268,12 +286,14 @@ The automated regressions cover session snapshots, injected filesystem/replaceme
 
 Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests; never corrupt active session files to simulate errors.
 
-- Test `/cd`, `/file-sidebar cd`, and both directory menu actions in 80- and 120-column windows, in Chinese and English. Include children, parent/sibling projects, `~/…`, Chinese names, spaces, quotes and `%`.
+- Test `/cd`, `/file-sidebar cd`, `/cd-new`, `/cd-resume`, and both directory menu actions in 80- and 120-column windows, in Chinese and English. Include children, parent/sibling projects, `~/…`, Chinese names, spaces, quotes and `%`.
+- For `/cd-new` across directories, check the new ID, empty conversation/draft, unchanged original session file, target resources/trust and storage. For `/cd-resume`, check that same empty target session exists before the native picker opens; select a saved target session, or cancel and stay in the empty target session. No command text may reach the model.
+- Choose the current directory (also via `.`, a relative alias and a symlink): `/cd` stays unchanged, `/cd-new` creates exactly one new session, and `/cd-resume` opens the native picker without new/session replacement events. Cancelling same-directory resume preserves the original session. Repeat same-directory cases with `--no-session`.
 - Check that `/cd` is centered with the conversation visible around its frame; resize it and verify column separators, ellipses, footer and bottom border. Select long names in both the picker and file tree: the bubble may extend past the sidebar, but must stay on-screen and keep keyboard focus on the owner. Test tooltip paging/wheel without changing selection or scrolling the conversation, and modal/exit cleanup.
 - Verify `.` toggles hidden items in both the tree and picker. In the picker, navigate to parents, siblings and descendants, then press `r`: it must return to the workspace's `.` row without confirming, preserve the hidden toggle, and discard late results from abandoned columns.
 - Compare `/session` before/after: same ID and message history, new cwd; inspect the target root/status, target trust prompt and resource reload. Saved language must survive; sidebar width resets to 32.
 - Leave a draft, switch via a menu, and verify its text survives (not necessarily its cursor). A subsequent reference must use the new root; the bridge must not add a user message to the transcript.
-- Cancel the picker, choose the current directory, and try nonexistent/unreadable targets: no snapshot/backup should be created. Exercise rapid repeated requests, streaming, queued messages, help/preview and external-editor blocking, and reload while a picker/read/save is pending.
+- Cancel each directory picker, choose the current directory with `/cd`, and try nonexistent/unreadable targets: no snapshot/backup should be created. Exercise rapid mixed requests, streaming, queued messages, help/preview and external-editor blocking, and reload while a picker/read/save is pending.
 - Check `.cd-backup` on success and `.cd-abandoned` on a cancelled/catchable failed takeover; neither belongs in `/resume`. Inject archive errors only in disposable tests: the new session should remain active and the original survive.
 - Exercise the documented fatal-runtime limitation: original session remains recoverable, but Pi may exit and leave an unclaimed `.jsonl`. Repeat source acceptance after installation and verify the old standalone extension is disabled and `/cd` is unambiguous.
 

@@ -1,5 +1,6 @@
 import { VERSION, type CustomEditor, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HStack, isViewportTUI, truncateToWidth, type Component, type OverlayHandle, type TUI } from "@earendil-works/pi-tui";
+import { SidebarError } from "./i18n.ts";
 
 type NativeTUI = TUI & { layoutRoot?: Component; getFocusedComponent(): Component | null };
 export type HostReason = "disposed" | "incompatible" | "closed" | "regular" | "waiting" | "small" | "external" | "mounted" | "floating" | "takenOver";
@@ -19,6 +20,27 @@ function contains(root: Component | undefined, target: Component | null): boolea
     if (Array.isArray(children)) pending.push(...children);
   }
   return false;
+}
+
+// 内置 /resume 不走 sendUserMessage；同步探针取得当前编辑器已注册的原生动作。
+// 不安装第二个选择器、不模拟按键；探针在执行动作前移除，不缓存跨会话的 editor/TUI。
+export function openNativeResume(ctx: ExtensionContext): void {
+  if (VERSION !== "1.4.0" || ctx.mode !== "tui" || !ctx.hasUI) throw new SidebarError("switchTuiOnly");
+  let tui: NativeTUI | undefined;
+  const key = "pi-file-sidebar:resume-probe";
+  try {
+    ctx.ui.setWidget(key, (native) => {
+      tui = native as NativeTUI;
+      return { render: () => [], invalidate() {} };
+    }, { placement: "belowEditor" });
+  } finally { ctx.ui.setWidget(key, undefined); }
+  const editor = tui?.getFocusedComponent?.() as Partial<CustomEditor> | null | undefined;
+  const resume = editor?.actionHandlers instanceof Map ? editor.actionHandlers.get("app.session.resume") : undefined;
+  if (!tui || tui.hasOverlay() || typeof resume !== "function" || typeof editor?.onAction !== "function"
+    || typeof editor.getText !== "function" || typeof editor.setText !== "function"
+    || (editor.getExpandedText?.() ?? editor.getText()) !== ctx.ui.getEditorText()) throw new SidebarError("resumeUnavailable");
+  ctx.ui.setEditorText("");
+  resume();
 }
 
 export class SidebarHost {

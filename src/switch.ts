@@ -6,16 +6,20 @@ import { SessionManager, type ExtensionContext, type FileEntry, type SessionEntr
 import { SidebarError } from "./i18n.ts";
 
 // 会话文件逻辑不操作 UI；宿主切换和新上下文副作用集中在 cd-command.ts。
-export function validateTarget(picked: string, current: string): string {
+export function validateTarget(picked: string, current: string, options: { allowCurrent?: boolean } = {}): string {
   const expanded = picked === "~" ? homedir() : picked.startsWith("~/") ? join(homedir(), picked.slice(2)) : picked;
   const target = fs.realpathSync(resolve(current, expanded));
   if (!fs.statSync(target).isDirectory()) throw new SidebarError("targetNotDirectory");
   fs.accessSync(target, fs.constants.R_OK | fs.constants.X_OK);
+  if (!options.allowCurrent && isCurrentDirectory(target, current)) throw new SidebarError("sameDirectory");
+  return target;
+}
+
+export function isCurrentDirectory(target: string, current: string): boolean {
   let actualCurrent = resolve(current);
   try { actualCurrent = fs.realpathSync(actualCurrent); }
   catch { /* 当前目录已消失时仍允许离开。 */ }
-  if (target === actualCurrent) throw new SidebarError("sameDirectory");
-  return target;
+  return target === actualCurrent;
 }
 
 export function requireIdle(ctx: Pick<ExtensionContext, "isIdle" | "hasPendingMessages">): boolean {
@@ -68,12 +72,24 @@ export function prepareSessionMove(manager: SessionManager, target: string): { d
   };
   // 保留全部分支；marker 挂在当前 leaf（包括 null），而不是最近写入的废弃分支。
   const entries: FileEntry[] = [{ ...header, cwd: target }, ...manager.getEntries(), marker];
+  return writeSessionSnapshot(destinationManager, entries, manager.getSessionFile());
+}
+
+export function prepareEmptySession(manager: SessionManager, target: string): { destination: string; sessionId: string } {
+  const destinationManager = SessionManager.create(target,
+    manager.usesDefaultSessionDir() ? undefined : manager.getSessionDir());
+  // 只写新宿主头部，不复制旧 ID、parentSession、消息、分支、名称或扩展状态。
+  const header = destinationManager.getHeader()!;
+  return { ...writeSessionSnapshot(destinationManager, [header], manager.getSessionFile()), sessionId: header.id };
+}
+
+function writeSessionSnapshot(manager: SessionManager, entries: FileEntry[], source?: string): { destination: string } {
   const content = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
   const timestamp = Date.now();
   for (let attempt = 0; attempt < 100; attempt++) {
     const fileTimestamp = new Date(timestamp + attempt).toISOString().replace(/[:.]/g, "-");
-    const destination = join(destinationManager.getSessionDir(), `${fileTimestamp}_${header.id}.jsonl`);
-    if (destination === manager.getSessionFile()) continue;
+    const destination = join(manager.getSessionDir(), `${fileTimestamp}_${manager.getSessionId()}.jsonl`);
+    if (destination === source) continue;
     let fd: number;
     try { fd = fs.openSync(destination, "wx", 0o600); }
     catch (error) {

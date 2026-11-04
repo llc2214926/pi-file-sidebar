@@ -1,6 +1,6 @@
 {
   "name": "pi-file-sidebar",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Pi 1.4.0 原生文件树与保留会话的工作目录切换",
   "type": "module",

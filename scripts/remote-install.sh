@@ -3,13 +3,13 @@
 # 只保留运行所需文件（extensions/ src/ package.json README LICENSE），不带 .git、scripts、tsconfig 等。
 # 注册源固定为 git:github.com/llc2214926/pi-file-sidebar，settings 由 pi install 写入。
 # 用法：curl -fsSL <raw-url>/scripts/remote-install.sh | bash
-# 可选参数：版本号（默认 0.1.3）
+# 可选参数：版本号（默认 0.2.1）
 # 注意：此目录被覆盖后不含 .git，`pi update` 对该包会失效；升级请重新执行本脚本。
 set -euo pipefail
 
 repo="llc2214926/pi-file-sidebar"
 git_source="git:github.com/llc2214926/pi-file-sidebar"
-version="${1:-0.1.3}"
+version="${1:-0.2.1}"
 expected_pi="1.4.0"
 
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
