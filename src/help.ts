@@ -25,6 +25,7 @@ export class SidebarHelp implements Component {
       { title: text.tree, rows: [
         ["Ctrl+Shift+E", text.activate],
         ["↑ / ↓", text.select],
+        ["[ / ]", text.nameTip],
         ["Home / End", text.firstLast],
         ["→ / ←", text.expandCollapse],
         ["Ctrl+U / Ctrl+D", text.halfPage],

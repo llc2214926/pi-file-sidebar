@@ -65,6 +65,7 @@ export class SidebarHost {
     return this.alive && this.enabled && !!this.wrapper && this.raw?.layoutRoot === this.wrapper
       && this.raw.mode === "fullscreen" && this.raw.terminal.rows >= 8 && (this.docked || (this.floating && this.fitsOverlay));
   }
+  get canOpenModal() { return this.alive && !!this.raw && !this.blocked && !this.paused && (!this.raw.hasOverlay() || this.focused); }
   get canInteract() {
     const focus = this.raw?.getFocusedComponent?.();
     return this.visible && !this.blocked && !this.paused && (focus === this.target || (focus === this.editor && !!this.editor));

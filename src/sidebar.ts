@@ -10,6 +10,8 @@ import { DoubleBorder, overlayHeight } from "./frame.ts";
 import { SidebarHelp } from "./help.ts";
 import { describeError, getMessages, isLanguage, SidebarError, type Language } from "./i18n.ts";
 import { saveLanguage } from "./language.ts";
+import { requireIdle, validateTarget } from "./switch.ts";
+import { NameTooltip } from "./name-tooltip.ts";
 
 // 按住 ↑/↓ 的加速档位（毫秒）：1.1s 后每次跳 2 项，2.6s 后每次跳 3 项。
 // 只依赖终端自动重复，不额外监听 timer；松开后下一次按键的间隔超出窗口即复位。
@@ -39,9 +41,11 @@ export class FileSidebar {
   private externalDone?: Promise<number | null>;
   private languageSave: Promise<void> = Promise.resolve();
   private languageGeneration = 0;
+  private nameTip?: NameTooltip;
 
   constructor(private ctx: ExtensionContext, private language: Language = "zh",
-    private persistLanguage: (language: Language) => Promise<void> = saveLanguage) {
+    private persistLanguage: (language: Language) => Promise<void> = saveLanguage,
+    private sendCommand?: (command: string) => void) {
     this.tree = new FileTree(ctx.cwd, (reveal) => {
       this.cache = undefined;
       if (reveal) this.revealSelection();
@@ -69,11 +73,14 @@ export class FileSidebar {
 
   get scrollTop() { return this.scroll.scrollTop; }
   get currentLanguage() { return this.language; }
+  get canSwitchDirectory() { return !this.disposed && !this.acting && !this.externalRunning && !this.host.resizing && this.host.canOpenModal; }
+  leaveForDirectoryCommand() { this.cancelActions(); this.host.leave(); }
   private get texts() { return getMessages(this.language); }
   private hostChanged() {
     if (this.disposed) return;
     const visible = this.host?.visible ?? false, focused = this.host?.focused ?? false;
     if (!visible) this.cancelActions();
+    if (!this.canShowNameTip) this.nameTip?.hide();
     if (!focused || this.host.resizing) this.held = undefined;
     if (!visible || !this.host.floating) {
       this.scrollbarGrab = undefined; this.floatingScrollbar = undefined; this.scroll.setScrollbarActive(false);
@@ -86,10 +93,28 @@ export class FileSidebar {
     }
     this.wasFocused = focused;
   }
+  private get canShowNameTip() {
+    return !this.disposed && !this.acting && !this.externalRunning && !!this.host?.canInteract && this.host.focused && !this.host.resizing;
+  }
+  private updateNameTip(data: ReturnType<FileTree["rows"]>, width: number) {
+    const tui = this.host?.tui, index = data.findIndex(({ node }) => node.path === this.tree.selected), selected = data[index];
+    if (!tui || !this.canShowNameTip || !selected
+      || visibleWidth(`> ${"  ".repeat(selected.depth)}  ${displayText(selected.node.name)}`) <= width) { this.nameTip?.hide(); return; }
+    if (this.nameTip?.tui !== tui) {
+      this.nameTip?.dispose();
+      this.nameTip = new NameTooltip(tui, () => this.ctx.ui.theme, () => this.language, () => this.canShowNameTip && this.host.tui === tui);
+    }
+    this.nameTip.update({ key: selected.node.path, name: selected.node.name, anchor: () => {
+      const row = 2 + index - this.scroll.scrollTop;
+      return row >= 2 && row < tui.terminal.rows - 2
+        ? { row, col: Math.min(this.host.width + 1, tui.terminal.columns - 1) } : undefined;
+    } });
+  }
   private renderRows(width: number): string[] {
+    const data = this.tree.rows();
+    this.updateNameTip(data, width); // 位置随滚动变化，即使文本缓存命中也要同步气泡。
     const key = `${width}:${this.tree.revision}:${this.host?.focused}:${this.language}`;
     if (this.cache?.key === key) return this.cache.lines;
-    const data = this.tree.rows();
     this.frame = data.map(({ node, depth }) => ({ path: node.path, marker: 2 + depth * 2 }));
     const lines = data.map(({ node, depth }) => {
       const selected = node.path === this.tree.selected;
@@ -105,7 +130,9 @@ export class FileSidebar {
   // 复用原树、表头/页脚和 ScrollView 状态，给临时浮层提供有界窗口。
   private renderFloating(width: number): string[] {
     const height = Math.max(1, (this.host.tui?.terminal.rows ?? 8) - 4);
-    const lines = this.rows.render(width);
+    // 先为滚动条留一列，省略号和全名提示都按真正可见的内容宽度判断。
+    const contentWidth = this.tree.rows().length > height ? Math.max(1, width - 1) : width;
+    const lines = this.rows.render(contentWidth);
     this.scroll.updateLayout(lines.length, height, () => this.host.redraw());
     const size = Math.min(height, Math.max(2, Math.round(height * height / Math.max(1, lines.length))));
     const max = Math.max(0, lines.length - height), travel = height - size;
@@ -214,7 +241,7 @@ export class FileSidebar {
   }
   private async runAction(work: (id: number) => Promise<void>) {
     if (this.acting || !this.host.canInteract || !this.host.focused || this.host.resizing) return;
-    this.acting = true; const id = ++this.actionGeneration;
+    this.acting = true; this.nameTip?.hide(); const id = ++this.actionGeneration;
     try { await work(id); }
     catch (error) { if (this.currentAction(id)) this.report(error); }
     finally {
@@ -299,7 +326,8 @@ export class FileSidebar {
         const createList = (maxVisible: number, selected?: string) => {
           const text = this.texts.menu;
           const items = [
-            ...(kind === "directory" ? [{ value: "toggle", label: text.toggle }] : []),
+            ...(kind === "directory" ? [{ value: "toggle", label: text.toggle },
+              { value: "cd-here", label: text.cdHere }, { value: "cd-pick", label: text.cdPick }] : []),
             ...(kind === "file" ? [{ value: "preview", label: text.preview }] : []),
             { value: "relative", label: text.relative }, { value: "absolute", label: text.absolute },
             ...(kind === "file" ? [{ value: "reference", label: text.reference },
@@ -336,11 +364,24 @@ export class FileSidebar {
       }, { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%" } });
       if (this.currentAction(id)) choice = result;
     });
-    if (choice === "preview") await this.preview(path);
+    if (choice === "cd-here" || choice === "cd-pick") this.sendCdBridgeCommand(choice === "cd-here" ? path : undefined);
+    else if (choice === "preview") await this.preview(path);
     else if (choice === "relative" || choice === "absolute") await this.copy(choice === "absolute", path);
     else if (choice === "reference") await this.reference(path);
     else if (choice === "external") await this.external(path);
     else if (choice === "toggle" && !this.disposed && this.host.canInteract) await this.tree.toggle(path);
+  }
+
+  private sendCdBridgeCommand(target?: string) {
+    if (this.disposed) return;
+    try {
+      if (!this.host.canInteract || !this.canSwitchDirectory || !this.sendCommand) throw new SidebarError("hostBusy");
+      if (!requireIdle(this.ctx)) throw new SidebarError("agentBusy");
+      if (target !== undefined) target = validateTarget(target, this.ctx.cwd);
+      const command = `/file-sidebar cd${target === undefined ? "" : ` ${encodeURIComponent(target)}`}`;
+      this.leaveForDirectoryCommand();
+      this.sendCommand(command);
+    } catch (error) { this.report(error); }
   }
 
   private input(data: string) {
@@ -355,6 +396,7 @@ export class FileSidebar {
       else if (matchesKey(data, "right")) this.host.resizeBy(1);
       return;
     }
+    if (this.nameTip?.handleInput(data)) { this.held = undefined; return; }
     if (matchesKey(data, "escape")) { this.cancelActions(); this.host.leave(); }
     else if (matchesKey(data, "h")) void this.help();
     else if (matchesKey(data, "l") && !this.acting) void this.changeLanguage(this.language === "zh" ? "en" : "zh");
@@ -374,7 +416,7 @@ export class FileSidebar {
     else if (data === "y") void this.copy();
     else if (data === "a") void this.reference();
     else if (data === "e") void this.external();
-    else if (data === ".") this.tree.toggleHidden();
+    else if (matchesKey(data, ".")) this.tree.toggleHidden();
     else if (data === "r") void this.tree.refresh();
   }
 
@@ -414,7 +456,7 @@ export class FileSidebar {
   dispose(): Promise<void> {
     const pending = this.externalDone;
     if (!this.disposed) {
-      this.disposed = true; this.cancelActions(); this.tree.dispose(); this.scroll.setScrollbar("hidden"); this.host.dispose();
+      this.disposed = true; this.nameTip?.dispose(); this.cancelActions(); this.tree.dispose(); this.scroll.setScrollbar("hidden"); this.host.dispose();
       this.frame = []; this.cache = undefined; this.pressed = undefined; this.clickedPath = undefined; this.held = undefined;
     }
     // 会话替换等待旧编辑器和已确认的语言写入；旧结果不能操作新 renderer 或覆盖新偏好。

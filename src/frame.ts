@@ -7,7 +7,7 @@ export function overlayHeight(rows: number): number {
 // 复用原生 Box 的留白与鼠标坐标转换，只将外圈留白换成双线边框。
 export class DoubleBorder implements Component {
   private box: Box;
-  constructor(private content: Component, private border: (text: string) => string) {
+  constructor(private content: Component & { dispose?(): void }, private border: (text: string) => string) {
     this.box = new Box(2, 1);
     this.box.addChild(content);
   }
@@ -18,6 +18,7 @@ export class DoubleBorder implements Component {
     return this.box.handleMouse(event) ?? (event.type === "wheel" ? { handled: true, render: false } : undefined);
   }
   invalidate() { this.box.invalidate(); }
+  dispose() { this.content.dispose?.(); }
 
   render(width: number): string[] {
     const lines = this.box.render(width);
