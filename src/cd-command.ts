@@ -3,6 +3,7 @@ import { DirPicker, shortenPath } from "./dir-picker.ts";
 import { describeError, getMessages, SidebarError, type Language } from "./i18n.ts";
 import { abandonDestination, archiveSource, isCurrentDirectory, persistentManager, prepareEmptySession, prepareSessionMove, requireIdle, SessionPreparationError, validateTarget } from "./switch.ts";
 import { openNativeResume } from "./host.ts";
+import { isSupportedPiVersion } from "./compat.ts";
 import { displayText } from "./tree.ts";
 import { DoubleBorder } from "./frame.ts";
 
@@ -112,7 +113,7 @@ export class DirectoryCommands {
   async command(args: string, ctx: ExtensionCommandContext, mode: DirectoryMode = "keep"): Promise<void> {
     if (this.disposed || ctx.mode !== "tui") return;
     const warn = (error: unknown) => ctx.ui.notify(displayText(describeError(error, this.language())), "warning");
-    if (VERSION !== "1.4.0" || !ctx.hasUI) { warn(new SidebarError("switchTuiOnly")); return; }
+    if (!isSupportedPiVersion(VERSION) || !ctx.hasUI) { warn(new SidebarError("switchTuiOnly")); return; }
     if (this.busy) { warn(new SidebarError("switchBusy")); return; }
     this.busy = true;
     let switching = false, switchLanguage = this.language();

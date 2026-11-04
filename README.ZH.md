@@ -2,43 +2,21 @@
 
 [English](README.md) | **[简体中文](README.ZH.md)**
 
-Pi 1.4.0 fullscreen 内的原生左侧文件树。宽窗口右侧保留 Pi 主界面、编辑器和原生对话滚动。窄窗口默认隐藏文件树，手动打开后临时覆盖会话左侧，返回输入框时收起；复用宿主 renderer。
+Pi 1.5.0 fullscreen 内的原生左侧文件树，向后兼容 Pi 1.4.0。宽窗口右侧保留 Pi 主界面、编辑器和原生对话滚动。窄窗口默认隐藏文件树，手动打开后临时覆盖会话左侧，返回输入框时收起；复用宿主 renderer。
 
-0.2.1 提供 `/cd` 保留会话切换工作目录、`/cd-new` 新建空会话，以及 `/cd-resume` 新建空会话后打开原生会话列表。正式 TUI 实机验收尚未完成。
+0.3.0 面向 Pi 1.5.0，宿主最低版本为 **>=1.4.0**。提供 `/cd` 保留会话切换工作目录、`/cd-new` 新建空会话，以及 `/cd-resume` 新建空会话后打开原生会话列表。正式 TUI 实机验收尚未完成。
 
 ## 安装
 
-### 远程安装（两种方式）
-
-**方式 A：git 源（Pi 标准流程）**
+### Git 源安装（Pi 标准流程）
 
 ```bash
 pi install git:github.com/llc2214926/pi-file-sidebar
 ```
 
-Pi 会把整个仓库克隆到 `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar`（设置 `PI_CODING_AGENT_DIR` 时用对应目录）并写入 `settings.json` 注册。目录保留 `.git`、`scripts/`、`tsconfig.json`、`package-lock.json` 等全部克隆内容，因此更新可用：`pi update git:github.com/llc2214926/pi-file-sidebar` 会 fetch 并对账到配置的 ref。安装需要 git 和一个 npm 包管理器（运行时本身零依赖，只声明宿主 peerDependencies）。
+Pi 会把整个仓库克隆到 `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar`（设置 `PI_CODING_AGENT_DIR` 时用对应目录）并写入 `settings.json` 注册。目录保留 `.git`、`scripts/`、`tsconfig.json` 等全部克隆内容，因此更新可用：`pi update git:github.com/llc2214926/pi-file-sidebar` 会 fetch 并对账到配置的 ref。安装需要 git 和一个 npm 包管理器（运行时本身零依赖，只声明宿主 peerDependencies）。
 
-**方式 B：remote-install.sh（GitHub Release 纯净包）**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/llc2214926/pi-file-sidebar/refs/heads/master/scripts/remote-install.sh | bash
-# 或指定版本
-bash remote-install.sh 0.2.1
-```
-
-脚本从 Release 下载 `pi-file-sidebar-<版本>.tgz`（即 `npm pack` 白名单产物：仅 `extensions/`、`src/`、`package.json`、`README*`、`LICENSE`），先用 `pi install` 注册同一 git 源，再原子地把克隆目录替换为纯净包。最终目录只包含扩展运行所需文件 —— 没有 `.git`、`scripts/`、`tsconfig.json`。
-
-**差异一览**
-
-| | A：`pi install git:…` | B：`remote-install.sh` |
-|---|---|---|
-| 安装目录内容 | 完整仓库克隆 | 仅打包白名单文件 |
-| 磁盘占用 | 仓库 + `.git`（约 420 KiB） | 仅包文件（约 180 KiB） |
-| `pi update` | 可用（fetch 配置的 ref） | **不可用** —— 无 `.git`；升级需重跑脚本并传新版本 |
-| 需要 GitHub Release tgz | 否 | 是（`v<版本>` 的 Release 附件） |
-| 其他步骤 | 无 | 校验 `curl`/`tar`/`node`/`pi`、验证 Pi 1.4.0 与包内容，失败可回滚的原子替换 |
-
-两种方式在 Pi 设置中注册的是同一个源字符串 `git:github.com/llc2214926/pi-file-sidebar`，占用同一个位置：先后安装会互相替换。任一方式安装后，在当前 Pi 执行 `/reload` 或重启 Pi。两者都只写 Pi 自己的 `settings.json` packages 项，不改 keybindings 和项目设置。
+安装后，在当前 Pi 执行 `/reload` 或重启 Pi。标准流程在 Pi 的 `settings.json` 中注册包，不改 keybindings 和项目设置。
 
 ### 本地发布（源码仓库）
 
@@ -54,7 +32,7 @@ bash remote-install.sh 0.2.1
 脚本要求已有开发依赖（首次运行前执行 `npm install --ignore-scripts`），先运行类型检查，再打包；不上传 npm、不提交代码、不自动重载 Pi。
 
 - 从 `package.json` 读取版本，不自动递增；包和清单输出到 `artifacts/releases/<版本>/`，npm 缓存放在 `artifacts/npm-cache/`，均不入库。
-- 默认安装到 `~/.pi/agent/local-packages/pi-file-sidebar/<版本>`；设置了 `PI_CODING_AGENT_DIR` 时使用该目录。自动安装只接受 Pi 1.4.0。
+- 默认安装到 `~/.pi/agent/local-packages/pi-file-sidebar/<版本>`；设置了 `PI_CODING_AGENT_DIR` 时使用该目录。自动安装接受 Pi >=1.4.0 正式版（允许构建元数据；拒绝预发布及格式无效的版本）。
 - 同版本目录内容一致时复用，内容不同或目标为符号链接时拒绝覆盖。**修改发布内容后，先提升 `package.json` 版本号再发布。**
 - 新版注册成功且核验持久化后，才移除同一安装根目录下其他版本的全局注册；保留旧版本文件，不处理其他位置的安装或项目级注册。有自定义资源过滤的侧栏注册需手动切换，不会被脚本覆盖。
 - 失败时停止并保留诊断，不修改目录所有权、不强删活动锁。若旧注册清理失败，新旧注册可能同时保留；处理后重试脚本，成功前不要 `/reload`。
@@ -62,14 +40,16 @@ bash remote-install.sh 0.2.1
 已解包的版本也可以手动注册：
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.2.1
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.0
 ```
 
 该安装目录由本地版本包生成。安装后在当前 Pi 执行 `/reload` 或重启 Pi。运行时使用独立安装副本，不依赖源码仓库，不需要 npm 账号。
 
 入口是 `extensions/index.ts`。包只声明宿主 peerDependencies，不携带第二份 Pi SDK。
 
-当前开发/测试基线为 Pi **1.4.0**、Node **24.22.2**、macOS Apple Silicon。其他版本、平台与终端没有完成兼容矩阵，不能据此宣称支持。regular 模式隐藏树；RPC/print/JSON 不创建侧栏运行时、不输出 UI/ANSI。宿主布局或焦点能力不兼容、或其他扩展接管 root 时，本扩展不覆盖其布局；用 `status` 查看原因。
+开发基线为 Pi **1.5.0**，保留 Pi **1.4.0** 作为向后兼容目标；环境为 Node **24.22.2**、macOS Apple Silicon。运行时及安装脚本的版本检查接受 **>=1.4.0** 正式版，不限制版本上限；允许构建元数据，拒绝预发布及格式无效的版本。版本检查通过不代表所有后续宿主、平台或终端都已验证：仍保留原生布局、焦点及恢复动作的能力检查。正式实机验收仍待完成。regular 模式隐藏树；RPC/print/JSON 不创建侧栏运行时、不输出 UI/ANSI。宿主布局或焦点能力不兼容、或其他扩展接管 root 时，本扩展不覆盖其布局；用 `status` 查看原因。
+
+挂载后若必要宿主能力消失，侧栏会取消未确认调宽、收起自有浮层并退让布局；仅在焦点仍可读取和设置时恢复原编辑器。布局 setter 不可用时，自有容器退化为仅透传主界面，不再调用缺失方法；能力恢复后可显式 `off` 重试恢复。不会覆盖其他扩展的布局或焦点。已退让的侧栏保持停用，直到 reload；若宿主连焦点 API 也已失效，则无法保证自动恢复焦点。
 
 ## 命令
 
@@ -134,11 +114,11 @@ pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.2.1
 
 两个新命令跨目录时不复制旧对话、分支、摘要、会话名称、扩展条目、父会话关联或草稿。不归档、不修改原会话文件，原会话仍可按正常方式恢复；新工作区资源仍遵循 Pi 的 trust 规则加载。不会自动选择要恢复的会话，需要在 Pi 原生列表中选择。跨目录后取消恢复列表，停留在目标目录的新空会话；同目录取消列表，保留原会话。取消目录选择器则两者都不执行。
 
-Pi 1.4.0 的扩展 `newSession()` API 不能指定 cwd，因此跨目录的新命令以私有权限、独占创建仅含新会话头的 JSONL，再交给 `switchSession()`；宿主生命周期事件将此次替换标为 `resume`，但 ID 与对话均为新的。默认存储跟随目标目录，显式配置的会话存储目录保持不变。同目录 `/cd-new` 直接使用 `newSession()`，不生成中转文件。跨目录要求会话持久化；同目录新建/恢复也支持内存会话。
+Pi 1.4.0 / 1.5.0 的扩展 `newSession()` API 不能指定 cwd，因此跨目录的新命令以私有权限、独占创建仅含新会话头的 JSONL，再交给 `switchSession()`；宿主生命周期事件将此次替换标为 `resume`，但 ID 与对话均为新的。默认存储跟随目标目录，显式配置的会话存储目录保持不变。同目录 `/cd-new` 直接使用 `newSession()`，不生成中转文件。跨目录要求会话持久化；同目录新建/恢复也支持内存会话。
 
 `/cd-resume` 调用当前宿主编辑器已注册的恢复动作，而不是 `sendUserMessage("/resume")`（它不会分发该内置命令）。列表、搜索、范围切换、改名/删除以及后续选择/取消均由 Pi 原生流程负责。如果自定义编辑器未暴露该动作，或模态/忙碌状态阻止操作，扩展会告警/报错，不会向模型发送文本。跨目录接管成功后若列表打开失败，保留新会话；返回主输入框手动执行 `/resume`。
 
-所有目录命令要求 **Pi 1.4.0 TUI**、agent 空闲、无待发送消息、无阻塞模态/外部编辑器/调宽事务。regular TUI 也可用，此时侧栏本身仍隐藏；非 TUI 静默。共用一个目录选择/切换在途锁。新 runtime 的侧栏宽度重置 **32**，成功保存的语言偏好保留。跨目录接管被取消或遇到可捕获错误时，未接管的空会话尽量隔离为 `.cd-abandoned`，不动原会话。下述致命 runtime 限制也适用于新命令，不保证自动恢复原 UI。
+所有目录命令要求 **Pi >=1.4.0 TUI**、agent 空闲、无待发送消息、无阻塞模态/外部编辑器/调宽事务。regular TUI 也可用，此时侧栏本身仍隐藏；非 TUI 静默。共用一个目录选择/切换在途锁。新 runtime 的侧栏宽度重置 **32**，成功保存的语言偏好保留。跨目录接管被取消或遇到可捕获错误时，未接管的空会话尽量隔离为 `.cd-abandoned`，不动原会话。下述致命 runtime 限制也适用于新命令，不保证自动恢复原 UI。
 
 ### 原有 `/cd` 的会话与失败语义
 
@@ -153,7 +133,7 @@ Pi 1.4.0 的扩展 `newSession()` API 不能指定 cwd，因此跨目录的新�
 
 ### 从独立 cd-picker 升级
 
-不要同时加载 `~/.pi/agent/extensions/cd-picker.ts` 和本版本：两者都注册 `/cd`。先用 `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen` 验证源码。实机验收通过后，备份独立扩展及现役安装，安装 0.2.1，再把旧扩展移至 `cd-picker.ts.disabled`，随后 `/reload` 并检查命令冲突。源码开发不会执行安装、停用或全局配置修改。回滚操作见源码仓库中的 [rollback-steps.md](rollback-steps.md)。
+不要同时加载 `~/.pi/agent/extensions/cd-picker.ts` 和本版本：两者都注册 `/cd`。先用 `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen` 验证源码。实机验收通过后，备份独立扩展及现役安装，安装 0.3.0，再把旧扩展移至 `cd-picker.ts.disabled`，随后 `/reload` 并检查命令冲突。源码开发不会执行安装、停用或全局配置修改。请保留上述备份，以便手动回滚。
 
 ## 键盘与鼠标
 
@@ -291,9 +271,11 @@ npm run typecheck
 node --import tsx --test tests/*.test.ts
 ```
 
-自动回归覆盖会话快照、注入的文件系统/替换错误、选择器导航、命令注册/编码，以及 Pi 1.4.0 renderer 和输入路由配合内存终端。另覆盖宿主已捕获本帧浮层列表之后收起全名气泡的时序：已卸载气泡的尺寸 getter 仍有效，旧组件不能渲染后来创建的气泡；不替代真实终端验收。
+自动回归覆盖会话快照、注入的文件系统/替换错误、选择器导航、命令注册/编码，以及宿主 renderer 和输入路由配合内存终端。修改宿主兼容性时，应对 Pi 1.5.0（开发依赖）及 Pi 1.4.0（隔离依赖目录）运行相同检查。另覆盖宿主已捕获本帧浮层列表之后收起全名气泡的时序：已卸载气泡的尺寸 getter 仍有效，旧组件不能渲染后来创建的气泡；不替代真实终端验收。
 
 ### 目录切换实机验收（尚未完成）
+
+以下各实机验收章节都应在 **Pi 1.5.0 和 Pi 1.4.0** 分别执行。自动测试及后台 PTY 冒烟检查不能替代人工真实终端验收。
 
 失败测试使用一次性项目和隔离的 `PI_CODING_AGENT_DIR`，不要破坏活动会话文件来模拟错误。
 

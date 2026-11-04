@@ -2,43 +2,21 @@
 
 **[English](README.md)** | [简体中文](README.ZH.md)
 
-A native left-side file tree for Pi 1.4.0 fullscreen mode. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
+A native left-side file tree for Pi 1.5.0 fullscreen mode, backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.2.1 provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.0 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. It provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
-### Remote installation (two options)
-
-**Option A: git source (standard Pi flow)**
+### Git source (standard Pi installation)
 
 ```bash
 pi install git:github.com/llc2214926/pi-file-sidebar
 ```
 
-Pi clones the whole repository to `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar` (or the `PI_CODING_AGENT_DIR` equivalent) and registers it in `settings.json`. The directory keeps `.git`, `scripts/`, `tsconfig.json`, `package-lock.json`, etc. — everything from a normal `git clone` — which is why updates work: `pi update git:github.com/llc2214926/pi-file-sidebar` fetches and reconciles the checkout. Requires git and an npm package manager to install (the runtime itself has zero dependencies; only host peerDependencies).
+Pi clones the whole repository to `~/.pi/agent/git/github.com/llc2214926/pi-file-sidebar` (or the `PI_CODING_AGENT_DIR` equivalent) and registers it in `settings.json`. The directory keeps `.git`, `scripts/`, `tsconfig.json`, etc. — everything from a normal `git clone` — which is why updates work: `pi update git:github.com/llc2214926/pi-file-sidebar` fetches and reconciles the checkout. Requires git and an npm package manager to install (the runtime itself has zero dependencies; only host peerDependencies).
 
-**Option B: remote-install.sh (clean package from the GitHub Release)**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/llc2214926/pi-file-sidebar/refs/heads/master/scripts/remote-install.sh | bash
-# or with an explicit version
-bash remote-install.sh 0.2.1
-```
-
-The script downloads the released `pi-file-sidebar-<version>.tgz` (the `npm pack` whitelist: only `extensions/`, `src/`, `package.json`, `README*`, `LICENSE`), registers the same git source via `pi install`, then atomically replaces the clone directory with the clean package. The final directory contains only the files the extension actually needs — no `.git`, no `scripts/`, no `tsconfig.json`.
-
-**Differences at a glance**
-
-| | A: `pi install git:…` | B: `remote-install.sh` |
-|---|---|---|
-| Install directory content | Full repository clone | Clean packed files only |
-| Disk footprint | Repository + `.git` (~420 KiB) | Package files only (~180 KiB) |
-| `pi update` | Works (fetches the configured ref) | **Does not work** — no `.git`; re-run the script with a new version to upgrade |
-| Needs a GitHub Release tgz | No | Yes (`v<version>` release asset) |
-| Other steps | None | Checks `curl`/`tar`/`node`/`pi`, verifies Pi 1.4.0 and package content, atomic replace with rollback on failure |
-
-Both register the identical source string `git:github.com/llc2214926/pi-file-sidebar` in Pi settings, so they occupy the same slot: installing one after the other replaces the previous copy. After either installation, run `/reload` in the current Pi or restart Pi. Both write only Pi's own `settings.json` packages entry; neither touches keybindings or project settings.
+After installation, run `/reload` in the current Pi or restart Pi. The standard flow registers the package in Pi's `settings.json`; it does not change keybindings or project settings.
 
 ### Local publishing (from the source repository)
 
@@ -54,7 +32,7 @@ Local publishing uses `npm pack` to build a versioned package, unpacks it into P
 The script requires the development dependencies to be installed (run `npm install --ignore-scripts` first), runs the type check, then packs. It does not upload to npm, commit code, or auto-reload Pi.
 
 - The version is read from `package.json` and never auto-incremented; packages and manifests go to `artifacts/releases/<version>/`, the npm cache lives in `artifacts/npm-cache/`, and neither is committed.
-- By default it installs to `~/.pi/agent/local-packages/pi-file-sidebar/<version>`; if `PI_CODING_AGENT_DIR` is set, that directory is used instead. Automatic installation only accepts Pi 1.4.0.
+- By default it installs to `~/.pi/agent/local-packages/pi-file-sidebar/<version>`; if `PI_CODING_AGENT_DIR` is set, that directory is used instead. Automatic installation accepts stable Pi versions >=1.4.0 (build metadata is allowed; prereleases and malformed versions are rejected).
 - An existing version directory with identical content is reused; differing content or a symlinked target is never overwritten. **After changing published content, bump the `package.json` version before publishing.**
 - Old registrations under the same install root are only removed after the new version is registered and the registration is confirmed to be persisted; old version files are kept, and installs in other locations or project-level registrations are not touched. Sidebar registrations with custom resource filters must be switched manually — the script never overwrites them.
 - On failure the script stops and preserves diagnostics; it does not change directory ownership or force-delete live locks. If old-registration cleanup fails, both old and new registrations may remain; resolve the issue and rerun the script, and do not `/reload` Pi until it succeeds.
@@ -62,14 +40,16 @@ The script requires the development dependencies to be installed (run `npm insta
 An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.2.1
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.0
 ```
 
 The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.
 
 The entry point is `extensions/index.ts`. The package only declares peerDependencies on the host and never ships a second copy of the Pi SDK.
 
-The current development/testing baseline is Pi **1.4.0**, Node **24.22.2**, macOS Apple Silicon. No compatibility matrix has been completed for other versions, platforms, or terminals; do not claim support based on this project. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
+The development baseline is Pi **1.5.0**, with Pi **1.4.0** retained as the backward-compatibility target, on Node **24.22.2**, macOS Apple Silicon. Runtime and installation version checks accept stable **>=1.4.0** versions, with no upper-version pin; build metadata is allowed and prereleases/malformed versions are rejected. A passing version check is not a claim that every later host, platform, or terminal is verified: native layout, focus, and resume-action capability checks remain in place. Formal real-terminal acceptance is still pending. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
+
+If required host capabilities disappear after mounting, the sidebar cancels width adjustment, closes its own overlays and yields the layout. It restores the original editor only when focus can still be read and set. If the layout setter is unavailable, its owned wrapper becomes a main-UI-only pass-through instead of calling the missing method; an explicit `off` can retry restoration after the capability returns. Foreign layouts/focus are not overwritten. The retired sidebar stays disabled until reload; if the host also loses its focus APIs, automatic focus restoration cannot be guaranteed.
 
 ## Commands
 
@@ -134,11 +114,11 @@ Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-s
 
 The fresh commands do not copy the old conversation, branches, summaries, session name, extension entries, parent-session link, or draft into a different directory. They do not archive or modify the original session file; it remains available for normal recovery. New workspace resources still load under Pi's trust rules. No session is automatically selected for resume: choose one in Pi's native picker. Cancelling that picker after a cross-directory switch leaves the new empty session active; cancelling it in the same directory keeps the original session. Cancelling the directory picker does neither.
 
-Pi 1.4.0's extension `newSession()` API cannot take a cwd. Cross-directory fresh commands therefore create a private, exclusive JSONL containing only a new session header and pass it to `switchSession()`; host lifecycle events label this replacement `resume`, although its ID and conversation are new. Default storage follows the target directory; explicitly configured storage stays in place. Same-directory `/cd-new` uses `newSession()` directly, without a staging file. Cross-directory switching requires persistence; same-directory new/resume also works with an in-memory session.
+The Pi 1.4.0 / 1.5.0 extension `newSession()` API cannot take a cwd. Cross-directory fresh commands therefore create a private, exclusive JSONL containing only a new session header and pass it to `switchSession()`; host lifecycle events label this replacement `resume`, although its ID and conversation are new. Default storage follows the target directory; explicitly configured storage stays in place. Same-directory `/cd-new` uses `newSession()` directly, without a staging file. Cross-directory switching requires persistence; same-directory new/resume also works with an in-memory session.
 
 `/cd-resume` invokes the current host editor's registered resume action, not `sendUserMessage("/resume")` (which would not dispatch that built-in command). Pi owns the list, search, scope, rename/delete controls and subsequent selection/cancellation. If a custom editor does not expose the native action or a modal/busy state blocks it, the extension reports a warning/error instead of sending text to the model. After a successful cross-directory takeover, failure to open the list leaves the new session active; return to the main editor and run `/resume` manually.
 
-All directory commands require **Pi 1.4.0 TUI**, idle processing, no queued messages, and no blocking modal/external editor/width adjustment. They work in regular TUI too, where the sidebar stays hidden; non-TUI modes are silent. They share one in-flight directory-picker/switch lock. New runtime creation resets sidebar width to **32** and keeps successfully saved language preferences. A cancelled or catchable failed cross-directory takeover quarantines the staged empty session as `.cd-abandoned`, without touching the original. The fatal-runtime limitation below applies to fresh switching too; it is not a promise of automatic UI rollback.
+All directory commands require **Pi >=1.4.0 TUI**, idle processing, no queued messages, and no blocking modal/external editor/width adjustment. They work in regular TUI too, where the sidebar stays hidden; non-TUI modes are silent. They share one in-flight directory-picker/switch lock. New runtime creation resets sidebar width to **32** and keeps successfully saved language preferences. A cancelled or catchable failed cross-directory takeover quarantines the staged empty session as `.cd-abandoned`, without touching the original. The fatal-runtime limitation below applies to fresh switching too; it is not a promise of automatic UI rollback.
 
 ### Existing `/cd` session and failure semantics
 
@@ -153,7 +133,7 @@ All directory commands require **Pi 1.4.0 TUI**, idle processing, no queued mess
 
 ### Upgrading from the standalone cd-picker
 
-Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.2.1, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. See [rollback-steps.md](rollback-steps.md) in the source repository for rollback steps.
+Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.3.0, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. Keep those backups for manual rollback.
 
 ## Keyboard and Mouse
 
@@ -291,9 +271,11 @@ npm run typecheck
 node --import tsx --test tests/*.test.ts
 ```
 
-The automated regressions cover session snapshots, injected filesystem/replacement failures, picker navigation, command registration/encoding, and Pi 1.4.0's renderer/input routing with an in-memory terminal. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
+The automated regressions cover session snapshots, injected filesystem/replacement failures, picker navigation, command registration/encoding, and the host renderer/input routing with an in-memory terminal. Run the same checks against both Pi 1.5.0 (development dependencies) and Pi 1.4.0 (an isolated dependency tree) when changing host compatibility. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
 
 ### Live Acceptance for Directory Switching (Not Yet Done)
+
+Run the following live-acceptance sections on **both Pi 1.5.0 and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance.
 
 Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests; never corrupt active session files to simulate errors.
 

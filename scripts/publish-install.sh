@@ -30,8 +30,12 @@ process.stdout.write(pkg.version);
 NODE
 )
 if ! $pack_only; then
-  command -v pi >/dev/null || fail "未找到 pi，请先安装 Pi 1.4.0"
-  [[ "$(pi --version)" == "1.4.0" ]] || fail "此项目仅验证 Pi 1.4.0，拒绝自动安装到其他版本"
+  command -v pi >/dev/null || fail "未找到 pi，请先安装 Pi >=1.4.0 正式版"
+  pi_version=$(pi --version) || fail "无法读取 Pi 版本"
+  node --input-type=module - "$pi_version" <<'NODE' || fail "需要 Pi >=1.4.0 正式版，当前为 $pi_version"
+import { isSupportedPiVersion } from "./src/compat.ts";
+process.exit(isSupportedPiVersion(process.argv[2]) ? 0 : 1);
+NODE
 fi
 
 work=""

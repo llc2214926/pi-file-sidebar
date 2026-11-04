@@ -1,8 +1,8 @@
 {
   "name": "pi-file-sidebar",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Pi 1.4.0 原生文件树与保留会话的工作目录切换",
+  "description": "Pi 1.5.0 原生文件树与保留会话的工作目录切换，兼容 1.4.0",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",
@@ -14,8 +14,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-tui": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-tui": "1.5.0",
     "@types/node": "24.10.0",
     "@xterm/headless": "5.5.0",
     "tsx": "4.20.6",

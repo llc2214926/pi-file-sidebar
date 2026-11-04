@@ -1,13 +1,18 @@
 import { VERSION, type CustomEditor, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HStack, isViewportTUI, truncateToWidth, type Component, type OverlayHandle, type TUI } from "@earendil-works/pi-tui";
 import { SidebarError } from "./i18n.ts";
+import { isSupportedPiVersion } from "./compat.ts";
 
 type NativeTUI = TUI & { layoutRoot?: Component; getFocusedComponent(): Component | null };
 export type HostReason = "disposed" | "incompatible" | "closed" | "regular" | "waiting" | "small" | "external" | "mounted" | "floating" | "takenOver";
 const PROBE = "pi-file-sidebar:host";
 export const ACTIVATE = "ctrl+shift+e";
 
-// Pi 1.4.0 的布局 getter 尚非公共契约；必要内部读取集中在本模块。
+// Pi 1.4.0 / 1.5.0 的布局 getter 尚非公共契约；必要内部读取集中在本模块。
+function getFocus(tui: NativeTUI | undefined): Component | null {
+  return typeof tui?.getFocusedComponent === "function" ? tui.getFocusedComponent() : null;
+}
+
 function contains(root: Component | undefined, target: Component | null): boolean {
   if (!root || !target) return false;
   const pending = [root], seen = new Set<Component>();
@@ -25,7 +30,7 @@ function contains(root: Component | undefined, target: Component | null): boolea
 // 内置 /resume 不走 sendUserMessage；同步探针取得当前编辑器已注册的原生动作。
 // 不安装第二个选择器、不模拟按键；探针在执行动作前移除，不缓存跨会话的 editor/TUI。
 export function openNativeResume(ctx: ExtensionContext): void {
-  if (VERSION !== "1.4.0" || ctx.mode !== "tui" || !ctx.hasUI) throw new SidebarError("switchTuiOnly");
+  if (!isSupportedPiVersion(VERSION) || ctx.mode !== "tui" || !ctx.hasUI) throw new SidebarError("switchTuiOnly");
   let tui: NativeTUI | undefined;
   const key = "pi-file-sidebar:resume-probe";
   try {
@@ -34,9 +39,9 @@ export function openNativeResume(ctx: ExtensionContext): void {
       return { render: () => [], invalidate() {} };
     }, { placement: "belowEditor" });
   } finally { ctx.ui.setWidget(key, undefined); }
-  const editor = tui?.getFocusedComponent?.() as Partial<CustomEditor> | null | undefined;
+  const editor = getFocus(tui) as Partial<CustomEditor> | null;
   const resume = editor?.actionHandlers instanceof Map ? editor.actionHandlers.get("app.session.resume") : undefined;
-  if (!tui || tui.hasOverlay() || typeof resume !== "function" || typeof editor?.onAction !== "function"
+  if (!tui || typeof tui.hasOverlay !== "function" || tui.hasOverlay() || typeof resume !== "function" || typeof editor?.onAction !== "function"
     || typeof editor.getText !== "function" || typeof editor.setText !== "function"
     || (editor.getExpandedText?.() ?? editor.getText()) !== ctx.ui.getEditorText()) throw new SidebarError("resumeUnavailable");
   ctx.ui.setEditorText("");
@@ -81,15 +86,18 @@ export class SidebarHost {
   private get fitsOverlay() { return (this.raw?.terminal.columns ?? 0) >= 26 && (this.raw?.terminal.rows ?? 0) >= 8; }
   get floating() { return !!this.overlay; }
   get maxWidth() { return Math.min(48, (this.raw?.terminal.columns ?? 0) - (this.floating ? 2 : 65)); }
-  get focused() { return this.raw?.getFocusedComponent?.() === this.target; }
+  get focused() { return this.alive && getFocus(this.raw) === this.target; }
   get alive() { return !this.disposed && !this.retired; }
   get visible() {
     return this.alive && this.enabled && !!this.wrapper && this.raw?.layoutRoot === this.wrapper
       && this.raw.mode === "fullscreen" && this.raw.terminal.rows >= 8 && (this.docked || (this.floating && this.fitsOverlay));
   }
-  get canOpenModal() { return this.alive && !!this.raw && !this.blocked && !this.paused && (!this.raw.hasOverlay() || this.focused); }
+  get canOpenModal() {
+    return this.alive && !!this.raw && !this.blocked && !this.paused && typeof this.raw.hasOverlay === "function"
+      && (!this.raw.hasOverlay() || this.focused);
+  }
   get canInteract() {
-    const focus = this.raw?.getFocusedComponent?.();
+    const focus = getFocus(this.raw);
     return this.visible && !this.blocked && !this.paused && (focus === this.target || (focus === this.editor && !!this.editor));
   }
   get reason(): HostReason {
@@ -104,12 +112,12 @@ export class SidebarHost {
   get tui(): TUI | undefined { return this.alive ? this.raw : undefined; }
 
   private queue() {
-    if (this.pending || this.disposed || this.paused) return;
+    if (this.pending || !this.alive || this.paused) return;
     this.pending = setImmediate(() => { this.pending = undefined; this.inspect(); });
   }
 
   private rememberEditor() {
-    const focus = this.raw?.getFocusedComponent?.();
+    const focus = getFocus(this.raw);
     if (!focus || focus === this.target || focus === this.editor) return;
     const input = focus as Partial<CustomEditor>;
     if (contains(this.main, focus) && typeof input.getText === "function" && typeof input.setText === "function"
@@ -119,10 +127,20 @@ export class SidebarHost {
   inspect() {
     const tui = this.raw;
     if (!tui || this.disposed || this.paused) return;
-    if (VERSION !== "1.4.0" || typeof tui.getFocusedComponent !== "function") {
+    if (!isSupportedPiVersion(VERSION) || typeof tui.getFocusedComponent !== "function"
+      || typeof tui.setFocus !== "function" || typeof tui.hasOverlay !== "function" || typeof tui.showOverlay !== "function"
+      || (tui.mode === "fullscreen" && (!isViewportTUI(tui) || typeof tui.setLayoutRoot !== "function"))) {
       this.retired = "incompatible";
     }
-    if (this.retired) { this.wasVisible = false; this.emit(); return; }
+    if (this.retired) {
+      // 先阻止重建，再取消调宽并释放自有 UI；不能只改状态而留下树焦点。
+      this.finishResize(false); this.detach();
+      if (this.pending) clearImmediate(this.pending);
+      this.pending = undefined;
+      this.emit();
+      // onChange 关闭阻塞模态后，宿主可能先把焦点还给已退让的树。
+      this.release(); return;
+    }
     if (tui.mode !== "fullscreen" || !isViewportTUI(tui)) {
       this.finishResize(false); this.detach();
       this.emit(); return;
@@ -159,7 +177,8 @@ export class SidebarHost {
 
   private rebuild() {
     const tui = this.raw;
-    if (!tui || !this.main || !this.alive || !isViewportTUI(tui) || tui.mode !== "fullscreen") return;
+    if (!tui || !this.main || !this.alive || !isViewportTUI(tui) || tui.mode !== "fullscreen"
+      || typeof tui.setLayoutRoot !== "function") return;
     if (this.wrapper && tui.layoutRoot !== this.wrapper) return;
     const visible = (v: { width: number; height?: number }) => this.alive && this.enabled && tui.mode === "fullscreen"
       && v.height !== undefined && v.height < Number.MAX_SAFE_INTEGER && v.height >= 8 && v.width >= this.width + 65;
@@ -184,8 +203,8 @@ export class SidebarHost {
   enter(toggle = false): boolean {
     if (!this.alive) return false;
     this.enabled = true; this.inspect();
-    const tui = this.raw, focus = tui?.getFocusedComponent?.();
-    if (!tui || !this.wrapper || tui.layoutRoot !== this.wrapper || this.blocked || this.paused
+    const tui = this.raw, focus = getFocus(tui);
+    if (!this.alive || !tui || !this.wrapper || tui.layoutRoot !== this.wrapper || this.blocked || this.paused
       || (focus !== this.target && (focus !== this.editor || !this.editor))) return false;
     if (!this.visible && this.fitsOverlay && tui.mode === "fullscreen") this.openOverlay();
     if (!this.canInteract) return false;
@@ -226,7 +245,7 @@ export class SidebarHost {
   }
 
   private release() {
-    if (this.focused && this.raw) {
+    if (this.raw && typeof this.raw.setFocus === "function" && getFocus(this.raw) === this.target) {
       this.raw.setFocus(contains(this.raw.layoutRoot ?? this.raw, this.editor) ? this.editor : null);
     }
   }
@@ -258,7 +277,7 @@ export class SidebarHost {
     this.inspect(); this.emit(); return true;
   }
   setEnabled(enabled: boolean) {
-    if (!this.alive) return;
+    if (this.disposed || (enabled && !this.alive)) return;
     this.finishResize(false); this.enabled = enabled;
     if (!enabled) { this.release(); this.detach(); }
     else this.inspect();
@@ -279,12 +298,22 @@ export class SidebarHost {
   private detach() {
     this.closeOverlay(); this.release();
     this.wasVisible = false;
-    if (this.wrapper && this.raw && isViewportTUI(this.raw) && this.raw.layoutRoot === this.wrapper) this.raw.setLayoutRoot(this.main);
+    if (this.wrapper && this.raw && this.raw.layoutRoot === this.wrapper) {
+      if (isViewportTUI(this.raw) && typeof this.raw.setLayoutRoot === "function") this.raw.setLayoutRoot(this.main);
+      else {
+        // 宿主已失去 root setter：只清空自己拥有的容器，保留原主界面全宽透传。
+        // 不写宿主私有字段；保留引用，允许显式 off/dispose 在能力恢复后重试。
+        this.wrapper.clear();
+        if (this.main) this.wrapper.addChild(this.main, { basis: 0, grow: 1, minSize: 1 });
+        return;
+      }
+    }
     this.wrapper = undefined; this.main = undefined;
   }
   dispose() {
     if (this.disposed) return;
-    this.finishResize(false); this.detach(); this.disposed = true; this.enabled = false;
+    this.disposed = true; this.enabled = false;
+    this.finishResize(false); this.detach();
     if (this.pending) clearImmediate(this.pending);
     this.pending = undefined; this.unsubscribe?.(); this.unsubscribe = undefined;
     this.ctx.ui.setWidget(PROBE, undefined);
