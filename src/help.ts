@@ -20,7 +20,8 @@ export class SidebarHelp implements Component {
 
   private sections(): HelpSection[] {
     const text = getMessages(this.language()).help;
-    const binding = (id: Keybinding) => displayText(this.keys.getKeys(id).join(" / ") || text.unbound);
+    const binding = (id: Keybinding, extra: string[] = []) =>
+      displayText([...new Set([...this.keys.getKeys(id), ...extra])].join(" / ") || text.unbound);
     return [
       { title: text.tree, rows: [
         ["Ctrl+Shift+E", text.activate],
@@ -54,7 +55,7 @@ export class SidebarHelp implements Component {
       ] },
       { title: text.menuKeys, rows: [
         [`${binding("tui.select.up")} / ${binding("tui.select.down")}`, text.selectAction],
-        [binding("tui.select.confirm"), text.runAction],
+        [binding("tui.select.confirm", ["space"]), text.runAction],
         [binding("tui.select.cancel"), text.closeMenu],
       ] },
       { title: text.preview, rows: [

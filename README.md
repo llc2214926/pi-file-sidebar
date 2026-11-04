@@ -176,6 +176,8 @@ Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both r
 | [ / ] | Page the full-name bubble when its content overflows; does not move the tree selection |
 | Esc / Ctrl+C | Return to the original Pi input object and retract a temporary overlay; drafts are kept and the agent is not interrupted |
 
+Once the file/directory action menu is open, **Enter or Space** executes the highlighted action through the same checks; clicking still works. This Space-to-confirm alias applies **only to this action menu**. In the tree, Space still opens the menu; the main editor, directory picker, preview, help, width adjustment and Pi's own dialogs keep their existing key behavior. No global keybindings are changed.
+
 Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. The scrollbar supports dragging; files and the divider are not draggable.
 
 **PageUp/PageDown policy:** with normal tree focus, Pi's main conversation paging is preserved; the tree uses Ctrl+U/Ctrl+D. In the preview or help panel that captures focus, PageUp/PageDown control that panel, not the main conversation. The original behavior of Tab, Ctrl+B, etc. in the main input box is unchanged; undefined plain keys inside the tree are never written to the main draft.
@@ -216,7 +218,16 @@ A missing configuration defaults to Chinese without auto-creating the file. An i
 
 ## Key Help
 
-Press `h` while the tree has focus to show the full reference as a two-column “Key | Action” table, grouped by tree navigation, file actions, width adjustment, action menu, and read-only preview; the action menu and main conversation paging keys show the current Pi configuration. At the default width the compact bottom hint is `Enter View · Space Menu · h Help` (Chinese: `Enter 预览 · Space 操作 · h 帮助`); narrow sidebars compress the Enter/Space hints to keep the `h` help entry. `w` remains for width adjustment.
+Press `h` while the tree has focus to show the full reference as a two-column “Key | Action” table, grouped by tree navigation, file actions, width adjustment, action menu, and read-only preview; the action menu and main conversation paging keys show the current Pi configuration, with the menu-only Space confirmation alias listed alongside the configured confirm keys. At the default width, the bottom shows these two hint rows below the selected path (each row is **32 display columns**, in both languages):
+
+```text
+Enter View · Space Menu · h Help
+y Copy path · a Ref · e External
+```
+
+The Chinese rows are `Enter 预览 · Space 操作 · h 帮助` and `y 复制路径 · a 引用 · e 外部打开`. Narrow sidebars use shorter labels on both rows, retain all six keys, and pad the shorter row to the same display width without wrapping. `y` copies the relative path, `a` inserts a reference without sending, and `e` opens the external editor subject to the existing file/idle checks; `w` remains for width adjustment.
+
+The footer reserves **three rows** (selected path + two hint rows) in both docked and floating trees. Together with the two header rows, this leaves `terminal rows − 5` for file rows: 19 at 24 rows, or 3 at the 8-row minimum. Scrolling, selection reveal, scrollbar dragging, tooltip bounds and mouse hit areas use this reduced tree area. Width adjustment temporarily replaces the footer with width/confirmation hints plus a blank row, keeping the tree height stable.
 
 The help overlay resizes with the terminal (85% of the window), and the table fills the available overlay width. The key column is sized by content while leaving room for the action column; the two columns wrap independently. Column widths are recalculated on window resize; long key names and Chinese descriptions are never horizontally truncated. The header stays fixed; scrolling affects only the group and action rows.
 
@@ -258,7 +269,7 @@ Priority matches Pi: trusted project/user `externalEditor`, then `$VISUAL`, `$ED
 
 The command is parsed into a program and separate argv; quotes and backslash escapes are supported, but shell pipes, redirection, and variable interpolation are not executed. Files open as a standalone absolute-path argument, and no prompt temp copy is created.
 
-Pi must be idle; state is re-checked right before launch. The TUI is stopped first, the process is launched asynchronously, and the TUI is restored on the normal, non-zero, and launch-failure paths. Closing/replacing a session first waits for the terminated old editor process; old results never start a renderer on a new context.
+Pi must be idle; state is re-checked right before launch. The TUI is stopped first, the process is launched asynchronously, and the TUI is restored with an explicit full redraw on the normal, non-zero, and launch-failure paths. No extra Esc is needed to bring the screen back; the original tree selection and main editor draft/cursor are preserved. Closing/replacing a session first waits for the terminated old editor process; old results never start a renderer on a new context.
 
 **GUI wait semantics:** configure waiting commands such as `code --wait` or `open -W -n -a TextEdit`. `open -W` waits for the app to exit; without a wait flag, the process exiting only means the launch command finished, not that editing is done. Closing Pi never forcibly closes GUI document windows that were launched independently.
 
@@ -300,11 +311,19 @@ Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests;
 ### Live Acceptance for Narrow Windows (Not Yet Done)
 
 - At 80×24, confirm the tree starts hidden. Open it with the command and shortcut; check the conversation remains full width behind the left overlay. Esc, Ctrl+C, and the shortcut must retract it and preserve the original draft/cursor.
+- In both docked and floating trees, verify the selected path plus two complete hint rows at widths 24/31/32/48, in Chinese and English. The two full hint rows each use 32 display columns; narrower widths keep all six keys. At terminal heights 8/12/24, check that exactly height − 5 file rows fit, End/arrow movement reveals the last row, footer clicks do not select hidden files, and footer wheel events never scroll the conversation. Width adjustment must not change the tree height or trigger directory reads.
 - Open help, the menu, and a file preview; close each back to the same tree selection, then leave the tree. Insert a reference and confirm it returns to the unobstructed editor without sending.
+- In file and directory action menus, confirm with both Enter and Space (including extended terminal key sequences); verify identical selection/cancel behavior and rejection of a busy external editor. Check the bilingual footer/help. Space must still only open the menu from the tree, and must not confirm the directory picker, close preview/help, confirm width adjustment, or change Pi's own dialogs.
 - Scroll, click after scrolling, double-click a file, drag the scrollbar, and check wheel boundaries. PageUp/PageDown must still page the conversation under ordinary tree focus.
 - Test 26/40/80/96/97/120 columns, short windows, width confirmation/cancel, off/on, reload, and another extension taking over the root. Enlarging restores the docked layout; a focused docked tree shrinks into the floating overlay, an unfocused one hides. Test both languages and wide file names.
 - In both the file tree and `/cd`, repeatedly shrink from 120 columns through 97/96/80/40/26, then enlarge again. At each width, use ↑/↓ to alternate between a truncated long name and a short name. The bubble must appear/disappear without a `name-tooltip` geometry exception, stale content or lost focus. Also close/disable the sidebar with a bubble visible and confirm no overlay remains.
 - With help, the menu, or a preview open, shrink and then enlarge the window: the modal must not be cancelled, and closing it returns to the floating tree or the docked layout.
+
+### Live Acceptance for the External Editor (Not Yet Done)
+
+- At 80 and 120 columns, launch using both tree `e` and menu Enter/Space. After exit, press no keys: the conversation and tree must repaint automatically with selection, width, draft and cursor preserved.
+- With isolated settings, cover normal exit, non-zero exit, a missing command, a GUI launcher that returns immediately, and waiting commands such as `code --wait`. A paused TUI while a waiting GUI editor is running is expected; a blank screen after its process exits is not.
+- Check rejection while Pi is busy and reload/session replacement during editing: replacement must wait for old child cleanup, and old completions must not restart a renderer or notify a new session.
 
 ### Live Acceptance for Language Switching (Not Yet Done)
 

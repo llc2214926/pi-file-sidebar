@@ -15,6 +15,8 @@ const zh = {
   resizeHint: "←→ Enter确认 Esc取消",
   footer: "Enter 预览 · Space 操作 · h 帮助",
   compactFooter: "Enter · Space · h 帮助",
+  actionFooter: "y 复制路径 · a 引用 · e 外部打开",
+  compactActionFooter: "y 复制 · a 引用 · e 打开",
   usage: "用法：/file-sidebar [focus|on|off|refresh|width 24…48|lang zh|en|status|cd [URI编码路径]]；/cd 保留会话，/cd-new 新会话，/cd-resume 新会话后选择恢复（同目录仅恢复）",
   status: (reason: string, width: number, focused: boolean, size: number, pending: number) =>
     `${reason}；宽度 ${width}；焦点 ${focused ? "文件树" : "Pi"}；缓存 ${size} 项；读取中 ${pending}；语言 中文（zh）`,
@@ -51,7 +53,7 @@ const zh = {
     external: "外部编辑器打开",
     externalBusy: "外部编辑器（Pi 忙碌，不可用）",
     cancel: "取消",
-    footer: "↑↓ Enter / 点击选择 · Esc 返回",
+    footer: "↑↓ Enter / 空格 / 点击选择 · Esc 返回",
   },
   switch: {
     switching: (source: string, destination: string) => `正在切换工作目录…\n原会话：${source}\n目标会话副本：${destination}`,
@@ -127,7 +129,7 @@ const zh = {
     leaveResize: "取消调宽并返回 Pi 输入框",
     menuKeys: "操作菜单（Space，使用 Pi 当前键位）",
     selectAction: "上下选择操作",
-    runAction: "执行选中操作",
+    runAction: "执行选中操作（仅本菜单支持空格确认）",
     closeMenu: "关闭菜单，返回文件树",
     preview: "只读预览",
     scrollLine: "上下滚动一行",
@@ -188,6 +190,8 @@ const en: typeof zh = {
   resizeHint: "←→ Enter:OK Esc:Cancel",
   footer: "Enter View · Space Menu · h Help",
   compactFooter: "Enter · Space · h Help",
+  actionFooter: "y Copy path · a Ref · e External",
+  compactActionFooter: "y Copy · a Ref · e Edit",
   usage: "Usage: /file-sidebar [focus|on|off|refresh|width 24…48|lang zh|en|status|cd [URI-encoded-path]]; /cd keeps the session, /cd-new starts fresh, /cd-resume starts fresh then opens resume (same directory: resume only)",
   status: (reason, width, focused, size, pending) =>
     `${reason}; width ${width}; focus ${focused ? "file tree" : "Pi"}; cached ${size}; pending ${pending}; language English (en)`,
@@ -224,7 +228,7 @@ const en: typeof zh = {
     external: "Open in external editor",
     externalBusy: "External editor (Pi is busy; unavailable)",
     cancel: "Cancel",
-    footer: "↑↓ Enter / click to select · Esc back",
+    footer: "↑↓ Enter / Space / click to select · Esc back",
   },
   switch: {
     switching: (source, destination) => `Switching working directory…\nOriginal session: ${source}\nTarget session copy: ${destination}`,
@@ -300,7 +304,7 @@ const en: typeof zh = {
     leaveResize: "Cancel resizing and return to the Pi editor",
     menuKeys: "Action menu (Space, current Pi bindings)",
     selectAction: "Select the previous / next action",
-    runAction: "Run the selected action",
+    runAction: "Run the selected action (Space confirms only in this menu)",
     closeMenu: "Close the menu and return to the tree",
     preview: "Read-only preview",
     scrollLine: "Scroll up / down one line",

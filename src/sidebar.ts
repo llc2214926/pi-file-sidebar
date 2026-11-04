@@ -17,6 +17,8 @@ import { NameTooltip } from "./name-tooltip.ts";
 // 只依赖终端自动重复，不额外监听 timer；松开后下一次按键的间隔超出窗口即复位。
 export const REPEAT_STEP_AFTER = [1100, 2600] as const;
 export const REPEAT_RESET_AFTER = 450;
+// 表头两行；页脚固定为路径一行和按键提示两行，调宽时也保留同样高度。
+const HEADER_ROWS = 2, FOOTER_ROWS = 3;
 
 export class FileSidebar {
   readonly host: SidebarHost;
@@ -58,11 +60,9 @@ export class FileSidebar {
     this.scroll.handleMouse = (event) => this.wheel(event, this.scroll);
     const text = (lines: (width: number) => string[]): Component => ({ render: (width) => lines(width).map((line) => truncateToWidth(line, width)), invalidate() {} });
     this.panel = new VStack([
-      { component: text(() => [this.ctx.ui.theme.fg("accent", `${this.texts.title} · ${this.texts.switchHint}${this.tree.showHidden ? this.texts.hidden : ""}`), displayText(basename(this.tree.root) || this.tree.root)]), basis: 2, shrink: 0 },
+      { component: text(() => [this.ctx.ui.theme.fg("accent", `${this.texts.title} · ${this.texts.switchHint}${this.tree.showHidden ? this.texts.hidden : ""}`), displayText(basename(this.tree.root) || this.tree.root)]), basis: HEADER_ROWS, shrink: 0 },
       { component: this.scroll, basis: 0, grow: 1, minSize: 1 },
-      { component: text((width) => this.host?.resizing
-        ? [this.texts.width(this.host.width, this.host.maxWidth), this.texts.resizeHint]
-        : [displayText(relative(this.tree.root, this.tree.selected) || "."), visibleWidth(this.texts.footer) <= width ? this.texts.footer : this.texts.compactFooter]), basis: 2, shrink: 0 },
+      { component: text((width) => this.renderFooter(width)), basis: FOOTER_ROWS, shrink: 0 },
     ]);
     this.panel.handleMouse = (event) => this.wheel(event, this.panel);
     this.host = new SidebarHost(ctx, this.panel, this.rows, () => this.hostChanged(), {
@@ -76,6 +76,17 @@ export class FileSidebar {
   get canSwitchDirectory() { return !this.disposed && !this.acting && !this.externalRunning && !this.host.resizing && this.host.canOpenModal; }
   leaveForDirectoryCommand() { this.cancelActions(); this.host.leave(); }
   private get texts() { return getMessages(this.language); }
+  private get treeHeight() { return Math.max(1, (this.host?.tui?.terminal.rows ?? 8) - HEADER_ROWS - FOOTER_ROWS); }
+  private renderFooter(width: number): string[] {
+    const text = this.texts;
+    if (this.host?.resizing) return [text.width(this.host.width, this.host.maxWidth), text.resizeHint, ""];
+    const full = [text.footer, text.actionFooter];
+    const hints = full.every((line) => visibleWidth(line) <= width) ? full : [text.compactFooter, text.compactActionFooter];
+    // 两行按显示列数补齐到相同宽度；窄窗使用精简文案，不换行挤占目录区域。
+    const hintWidth = Math.min(width, Math.max(...hints.map((line) => visibleWidth(line))));
+    return [displayText(relative(this.tree.root, this.tree.selected) || "."),
+      ...hints.map((line) => truncateToWidth(line, hintWidth, "", true))];
+  }
   private hostChanged() {
     if (this.disposed) return;
     const visible = this.host?.visible ?? false, focused = this.host?.focused ?? false;
@@ -105,8 +116,8 @@ export class FileSidebar {
       this.nameTip = new NameTooltip(tui, () => this.ctx.ui.theme, () => this.language, () => this.canShowNameTip && this.host.tui === tui);
     }
     this.nameTip.update({ key: selected.node.path, name: selected.node.name, anchor: () => {
-      const row = 2 + index - this.scroll.scrollTop;
-      return row >= 2 && row < tui.terminal.rows - 2
+      const row = HEADER_ROWS + index - this.scroll.scrollTop;
+      return row >= HEADER_ROWS && row < tui.terminal.rows - FOOTER_ROWS
         ? { row, col: Math.min(this.host.width + 1, tui.terminal.columns - 1) } : undefined;
     } });
   }
@@ -129,7 +140,7 @@ export class FileSidebar {
   // Pi 1.4.0 的 overlay 只调用 render(width)，不分配 VStack/ScrollView 的视口高度。
   // 复用原树、表头/页脚和 ScrollView 状态，给临时浮层提供有界窗口。
   private renderFloating(width: number): string[] {
-    const height = Math.max(1, (this.host.tui?.terminal.rows ?? 8) - 4);
+    const height = this.treeHeight;
     // 先为滚动条留一列，省略号和全名提示都按真正可见的内容宽度判断。
     const contentWidth = this.tree.rows().length > height ? Math.max(1, width - 1) : width;
     const lines = this.rows.render(contentWidth);
@@ -151,7 +162,7 @@ export class FileSidebar {
   private floatingMouse(event: TuiMouseEvent) {
     if (event.type === "wheel") return this.wheel(event, this.panel);
     if (!this.host.canInteract || this.host.resizing) return { handled: true };
-    const bar = this.floatingScrollbar, y = event.y - 2;
+    const bar = this.floatingScrollbar, y = event.y - HEADER_ROWS;
     const overBar = !!bar && event.x === event.width - 1 && y >= 0 && y < this.scroll.viewportHeight;
     this.scroll.setScrollbarActive(overBar || this.scrollbarGrab !== undefined);
     if (bar && event.button === "left" && (overBar || this.scrollbarGrab !== undefined)) {
@@ -171,7 +182,7 @@ export class FileSidebar {
   private revealSelection() {
     if (!this.host?.visible) return;
     const rows = this.tree.rows(), index = rows.findIndex((row) => row.node.path === this.tree.selected);
-    const height = Math.max(1, (this.host.tui?.terminal.rows ?? 8) - 4);
+    const height = this.treeHeight;
     this.scroll.updateLayout(rows.length, height, () => this.host.redraw());
     if (index < this.scroll.scrollTop) this.scroll.scrollTo(index);
     else if (index >= this.scroll.scrollTop + height) this.scroll.scrollTo(index - height + 1);
@@ -306,7 +317,10 @@ export class FileSidebar {
       } finally {
         this.child = undefined; this.externalDone = undefined; this.externalRunning = false;
         if (!this.disposed && this.host.alive && this.host.tui === tui) {
-          tui.start(); this.host.setPaused(false); this.host.redraw(); void this.tree.refresh([dirname(path)]);
+          tui.start(); this.host.setPaused(false); this.host.redraw();
+          // Pi 1.4.0 的 stop() 取消帧任务却保留待绘标记；普通请求会被合并掉，必须强制排入恢复帧。
+          tui.requestRender(true);
+          void this.tree.refresh([dirname(path)]);
         }
       }
       if (!this.currentAction(id)) return;
@@ -359,7 +373,13 @@ export class FileSidebar {
           invalidate: () => list.invalidate(),
         });
         component.addChild({ render: (width) => [truncateToWidth(this.texts.menu.footer, width)], invalidate() {} });
-        component.handleInput = (data) => list.handleInput(data);
+        component.handleInput = (data) => {
+          // 仅此操作菜单将空格作为确认别名，复用 Enter/鼠标的选择回调及忙碌检查。
+          if (matchesKey(data, "space")) {
+            const selected = list.getSelectedItem();
+            if (selected) list.onSelect?.(selected);
+          } else list.handleInput(data);
+        };
         return new DoubleBorder(component, (text) => this.ctx.ui.theme.fg("border", text));
       }, { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%" } });
       if (this.currentAction(id)) choice = result;
