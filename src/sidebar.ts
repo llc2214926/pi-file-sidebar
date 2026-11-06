@@ -20,6 +20,13 @@ export const REPEAT_RESET_AFTER = 450;
 // 表头两行；页脚固定为路径一行和按键提示两行，调宽时也保留同样高度。
 const HEADER_ROWS = 2, FOOTER_ROWS = 3;
 
+// 保留原生 auto 的鼠标命中/拖动；滚离顶部后不再受闲置隐藏计时器影响。
+class TreeScrollView extends ScrollView {
+  override get isScrollbarVisible(): boolean {
+    return super.isScrollbarVisible || (this.scrollbar === "auto" && this.viewportHeight > 0 && this.scrollTop > 0);
+  }
+}
+
 export class FileSidebar {
   readonly host: SidebarHost;
   readonly tree: FileTree;
@@ -55,7 +62,7 @@ export class FileSidebar {
     });
     this.rows = { focused: false, render: (width) => this.renderRows(width),
       invalidate: () => { this.cache = undefined; }, handleInput: (data) => this.input(data), handleMouse: (event) => this.mouse(event) };
-    this.scroll = new ScrollView(this.rows, { follow: "none", overscroll: "contain", scrollbar: "auto" });
+    this.scroll = new TreeScrollView(this.rows, { follow: "none", overscroll: "contain", scrollbar: "auto" });
     // 1.4.0 的 contain 仍会将边界残余量回退到主对话；只在自己的组件消费 wheel。
     this.scroll.handleMouse = (event) => this.wheel(event, this.scroll);
     const text = (lines: (width: number) => string[]): Component => ({ render: (width) => lines(width).map((line) => truncateToWidth(line, width)), invalidate() {} });
@@ -436,7 +443,7 @@ export class FileSidebar {
     else if (data === "y") void this.copy();
     else if (data === "a") void this.reference();
     else if (data === "e") void this.external();
-    else if (matchesKey(data, ".")) this.tree.toggleHidden();
+    else if (matchesKey(data, ".") || data === "。") this.tree.toggleHidden();
     else if (data === "r") void this.tree.refresh();
   }
 

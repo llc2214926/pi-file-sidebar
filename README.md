@@ -4,7 +4,7 @@
 
 A native left-side file tree for Pi 1.5.0 fullscreen mode, backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.3.0 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. It provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.1 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. It provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -40,7 +40,7 @@ The script requires the development dependencies to be installed (run `npm insta
 An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.0
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.1
 ```
 
 The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.
@@ -83,24 +83,36 @@ With a directory selected, Space includes these additional actions (after expand
 
 File and symlink menus do not contain these actions. No new global shortcut is added. The ordinary file tree stays rooted at `ctx.cwd`; only the separate picker can browse parents and sibling projects.
 
-### Picker controls
+### Picker keyboard and mouse controls
 
 Like file preview, the picker opens in a **centered, double-bordered floating window**, not a full-screen panel: 85% terminal width, at most 90% terminal height and 30 rows including the frame. The conversation remains visible around it. Directory columns have vertical separators; overlong names end in `…`. Selecting a truncated name opens the shared full-name bubble described below, which can extend beyond its column or the picker window without taking focus.
 
+Each column has its own right-edge position scrollbar once its list scrolls away from the top. It stays visible while idle, including in a still-visible parent column after entering a child, and hides when that column returns to the top or all rows fit. The thumb shows the visible portion and position in that column, not the active column's position. It is a position indicator only (no clicking or dragging); existing picker keys are unchanged. A visible bar reserves one text column, including for ellipsis and full-name detection (at a one-column width, text takes priority).
+
+Each column lists **directories first, then regular files**, sorted by name within each group. Files use the theme's dim color (even when selected) and have no trailing `/`. You can select a file to read its name or full-name bubble, but **Enter, → and `l` do nothing on files**: they do not enter, confirm, open or read the file. Only directories (including `.`) can be chosen as the working directory.
+
 | Picker input | Behavior |
 |---|---|
-| ↑ / ↓, j / k | Select; only held arrow keys accelerate at ~1.1s / ~2.6s (2 / 3 rows per repeat) |
+| ↑ / ↓, j / k | Select a directory or file row; only held arrow keys accelerate at ~1.1s / ~2.6s (2 / 3 rows per repeat) |
 | ← | Go to the parent/previous column |
-| → / l | Enter the highlighted child directory |
-| . | Show/hide dot directories and `node_modules`, matching the file tree |
+| → / l | Enter the highlighted child directory; no action on files |
+| Left click (fullscreen) | Select a file only; select and enter a child directory; select `.` without confirming |
+| Mouse wheel (fullscreen) | Scroll the column under the pointer without changing selection, the active column, or focus |
+| . | Show/hide dot entries (files and directories) and `node_modules`, matching the file tree |
 | r | Return to the current workspace (`ctx.cwd` when the picker opened), without switching sessions |
 | [ / ] | Previous / next page of an overflowing full-name bubble; the selection stays put |
-| Enter | Select the highlighted directory; the `.` row selects this column's directory |
+| Enter | Select the highlighted directory; the `.` row selects this column's directory; no action on files |
 | Esc / Ctrl+C | Cancel without a session snapshot or backup |
+
+In fullscreen mode, left-click a row in any visible column, including a parent column. A file is only selected (with its full-name bubble if truncated); a directory is selected and opened in the next column. Clicking an earlier column discards its old descendant columns. Clicking `.` only selects that column's directory. **Clicks never confirm a working-directory/session switch**; press Enter to confirm. Headers, footers, separators, position bars, blank rows and loading/error messages are not selectable; hovering, right-clicking and dragging do not navigate. Regular TUI keeps keyboard-only navigation. This applies to all commands that share the picker, including `/cd-new` and `/cd-resume`.
+
+The mouse wheel scrolls only the visible list column under the pointer, including over its position bar; parent columns scroll independently without closing their descendants. It does not select or enter an item, switch sessions, or read directories. At either edge, and over the frame, header, footer, separators or loading/error states, wheel events do not reach the conversation. Scrolling a selected name out of view hides its bubble; keyboard selection movement reveals the selection again. Wheel events over a full-name bubble still scroll only that bubble.
 
 Press `r` from any browsed directory to return to the workspace: reset to one column, select its `.` row, clear scroll offsets and the name bubble, and keep the hidden-items toggle. The workspace column is reused when available; otherwise only that directory is read again. This is navigation only, not confirmation or refresh; the file tree's own `r` still refreshes and `h` still opens help. `h` no longer toggles hidden items in the picker.
 
-The picker reads only entered directory levels asynchronously. It does not recurse, watch, or follow symlink entries. Loading, empty-directory and read-error states are distinct. It uses the sidebar language; `l` navigates here, not language switching. Names and paths are sanitized for display, not translated or changed on disk.
+Held ↑/↓ acceleration applies to both directory and file rows, using the same ~1.1s / ~2.6s thresholds as the sidebar. Reversing direction, pausing longer than the release-reset window, or using a non-arrow action resets the next arrow movement to one row; `j` / `k` always move one row. It uses terminal key repeats only, with no extra timer or directory reads.
+
+The picker reads only entered directory levels asynchronously, never file contents. It does not recurse, watch, or follow symlink entries; symlinks and special entries remain omitted. Loading, no-visible-items and read-error states are distinct; a directory containing only files shows those files rather than an empty-directory message. It uses the sidebar language; `l` navigates here, not language switching. Names and paths are sanitized for display, not translated or changed on disk.
 
 Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-sidebar cd %2FUsers%2Fme%2FMy%20Project`. Encode the whole path once with `encodeURIComponent`; malformed encoding is rejected. Relative paths resolve against the current `ctx.cwd`; `~` and `~/…` are supported. Explicit targets are resolved with `realpath` (including symlinks) and must be directories with read/execute access. For `/cd`, picking the current real directory gives a no-op notice; `/cd-new` and `/cd-resume` follow the same-directory rules below. All three commands share the picker and path encoding. No shell is invoked.
 
@@ -133,7 +145,7 @@ All directory commands require **Pi >=1.4.0 TUI**, idle processing, no queued me
 
 ### Upgrading from the standalone cd-picker
 
-Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.3.0, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. Keep those backups for manual rollback.
+Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.3.1, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. Keep those backups for manual rollback.
 
 ## Keyboard and Mouse
 
@@ -158,7 +170,7 @@ Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both r
 
 Once the file/directory action menu is open, **Enter or Space** executes the highlighted action through the same checks; clicking still works. This Space-to-confirm alias applies **only to this action menu**. In the tree, Space still opens the menu; the main editor, directory picker, preview, help, width adjustment and Pi's own dialogs keep their existing key behavior. No global keybindings are changed.
 
-Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. The scrollbar supports dragging; files and the divider are not draggable.
+Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. In both docked and floating trees, the position scrollbar stays visible while the list is scrolled away from the top: it no longer fades after a pause. Returning to the top restores the host's short auto-hide delay; the bar hides immediately when all rows fit. Hovering/dragging can still reveal it at the top. The scrollbar supports dragging; files and the divider are not draggable.
 
 **PageUp/PageDown policy:** with normal tree focus, Pi's main conversation paging is preserved; the tree uses Ctrl+U/Ctrl+D. In the preview or help panel that captures focus, PageUp/PageDown control that panel, not the main conversation. The original behavior of Tab, Ctrl+B, etc. in the main input box is unchanged; undefined plain keys inside the tree are never written to the main draft.
 
@@ -283,7 +295,12 @@ Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests;
 - For `/cd-new` across directories, check the new ID, empty conversation/draft, unchanged original session file, target resources/trust and storage. For `/cd-resume`, check that same empty target session exists before the native picker opens; select a saved target session, or cancel and stay in the empty target session. No command text may reach the model.
 - Choose the current directory (also via `.`, a relative alias and a symlink): `/cd` stays unchanged, `/cd-new` creates exactly one new session, and `/cd-resume` opens the native picker without new/session replacement events. Cancelling same-directory resume preserves the original session. Repeat same-directory cases with `--no-session`.
 - Check that `/cd` is centered with the conversation visible around its frame; resize it and verify column separators, ellipses, footer and bottom border. Select long names in both the picker and file tree: the bubble may extend past the sidebar, but must stay on-screen and keep keyboard focus on the owner. Test tooltip paging/wheel without changing selection or scrolling the conversation, and modal/exit cleanup.
-- Verify `.` toggles hidden items in both the tree and picker. In the picker, navigate to parents, siblings and descendants, then press `r`: it must return to the workspace's `.` row without confirming, preserve the hidden toggle, and discard late results from abandoned columns.
+- Scroll several `/cd` columns to different positions and pause for at least 5 seconds: each visible column must retain its own thumb, including inactive parents. Returning a column to the top, pressing `r`, or making all its rows fit must hide its bar. Check the last column, narrow/short windows, hidden-item reloads, and full-name bubbles for names that only become truncated by the bar; scrolling/rendering must not add directory reads.
+- Wheel-scroll the active and visible parent columns separately (including over their position bars); keep selection, active column, descendant columns and focus unchanged. Check rapid wheel events, top/bottom boundaries, short/empty/loading/error columns, frame/header/footer/separators, resize, hidden-item reloads and click-after-scroll accuracy. No wheel event inside the picker may scroll the conversation or read a directory. A selected name's bubble must hide when scrolled out of view; keyboard selection must become visible again, with held-arrow acceleration reset.
+- In fullscreen, click file, directory and `.` rows in the active and visible parent columns: files only select, directories select and enter once, `.` only selects, and no click switches sessions. Check independent column scroll offsets, horizontally clipped columns after narrowing, wrapped bilingual footers, blank/loading/error rows, separators and position bars; none may target an unintended row. Hover/right-click/drag must not navigate, and the next held-arrow movement after a click starts at one row. Repeat through `/cd-new` and `/cd-resume`; regular TUI retains keyboard navigation.
+- In a picker column containing both directories and files, verify directories sort first, files stay dim without `/` even when selected, and Enter/→/`l` on a file neither closes the picker nor enters/opens it or switches sessions. Test files-only and empty directories, hidden files via `.`, long/control-character names, and omitted symlinks. `.` and directory confirmation must still work.
+- Hold ↑/↓ across directory and file rows: verify 1/2/3-row steps at ~1.1s / ~2.6s, selection visibility at scroll boundaries, and one-row movement after reversing direction, releasing/pausing, ignored file confirmation, entering/leaving a column or returning with `r`. `j`/`k` remain single-step; scrolling or ignored file actions must not reread directories.
+- Verify `.` and a single Chinese full stop `。` both toggle hidden items in the tree and picker; no extra UI hint is added for the alias. In the picker, navigate to parents, siblings and descendants, then press `r`: it must return to the workspace's `.` row without confirming, preserve the hidden toggle, and discard late results from abandoned columns.
 - Compare `/session` before/after: same ID and message history, new cwd; inspect the target root/status, target trust prompt and resource reload. Saved language must survive; sidebar width resets to 32.
 - Leave a draft, switch via a menu, and verify its text survives (not necessarily its cursor). A subsequent reference must use the new root; the bridge must not add a user message to the transcript.
 - Cancel each directory picker, choose the current directory with `/cd`, and try nonexistent/unreadable targets: no snapshot/backup should be created. Exercise rapid mixed requests, streaming, queued messages, help/preview and external-editor blocking, and reload while a picker/read/save is pending.
@@ -296,7 +313,7 @@ Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests;
 - In both docked and floating trees, verify the selected path plus two complete hint rows at widths 24/31/32/48, in Chinese and English. The two full hint rows each use 32 display columns; narrower widths keep all six keys. At terminal heights 8/12/24, check that exactly height − 5 file rows fit, End/arrow movement reveals the last row, footer clicks do not select hidden files, and footer wheel events never scroll the conversation. Width adjustment must not change the tree height or trigger directory reads.
 - Open help, the menu, and a file preview; close each back to the same tree selection, then leave the tree. Insert a reference and confirm it returns to the unobstructed editor without sending.
 - In file and directory action menus, confirm with both Enter and Space (including extended terminal key sequences); verify identical selection/cancel behavior and rejection of a busy external editor. Check the bilingual footer/help. Space must still only open the menu from the tree, and must not confirm the directory picker, close preview/help, confirm width adjustment, or change Pi's own dialogs.
-- Scroll, click after scrolling, double-click a file, drag the scrollbar, and check wheel boundaries. PageUp/PageDown must still page the conversation under ordinary tree focus.
+- Scroll, click after scrolling, double-click a file, drag the scrollbar, and check wheel boundaries. In both docked and floating trees, move below the first visible page and wait at least 5 seconds: the thumb must remain visible. Arrow back to the top or press Home: the bar must auto-hide after the host's short delay unless hovered/dragged. Also test collapse, resize until all rows fit, off/on, and focus changes without losing the scroll position. PageUp/PageDown must still page the conversation under ordinary tree focus.
 - Test 26/40/80/96/97/120 columns, short windows, width confirmation/cancel, off/on, reload, and another extension taking over the root. Enlarging restores the docked layout; a focused docked tree shrinks into the floating overlay, an unfocused one hides. Test both languages and wide file names.
 - In both the file tree and `/cd`, repeatedly shrink from 120 columns through 97/96/80/40/26, then enlarge again. At each width, use ↑/↓ to alternate between a truncated long name and a short name. The bubble must appear/disappear without a `name-tooltip` geometry exception, stale content or lost focus. Also close/disable the sidebar with a bubble visible and confirm no overlay remains.
 - With help, the menu, or a preview open, shrink and then enlarge the window: the modal must not be cancelled, and closing it returns to the floating tree or the docked layout.
