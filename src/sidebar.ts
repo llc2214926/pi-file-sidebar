@@ -10,7 +10,6 @@ import { DoubleBorder, overlayHeight } from "./frame.ts";
 import { SidebarHelp } from "./help.ts";
 import { describeError, getMessages, isLanguage, SidebarError, type Language } from "./i18n.ts";
 import { saveLanguage } from "./language.ts";
-import { requireIdle, validateTarget } from "./switch.ts";
 import { NameTooltip } from "./name-tooltip.ts";
 
 // 按住 ↑/↓ 的加速档位（毫秒）：1.1s 后每次跳 2 项，2.6s 后每次跳 3 项。
@@ -53,8 +52,7 @@ export class FileSidebar {
   private nameTip?: NameTooltip;
 
   constructor(private ctx: ExtensionContext, private language: Language = "zh",
-    private persistLanguage: (language: Language) => Promise<void> = saveLanguage,
-    private sendCommand?: (command: string) => void) {
+    private persistLanguage: (language: Language) => Promise<void> = saveLanguage) {
     this.tree = new FileTree(ctx.cwd, (reveal) => {
       this.cache = undefined;
       if (reveal) this.revealSelection();
@@ -80,8 +78,6 @@ export class FileSidebar {
 
   get scrollTop() { return this.scroll.scrollTop; }
   get currentLanguage() { return this.language; }
-  get canSwitchDirectory() { return !this.disposed && !this.acting && !this.externalRunning && !this.host.resizing && this.host.canOpenModal; }
-  leaveForDirectoryCommand() { this.cancelActions(); this.host.leave(); }
   private get texts() { return getMessages(this.language); }
   private get treeHeight() { return Math.max(1, (this.host?.tui?.terminal.rows ?? 8) - HEADER_ROWS - FOOTER_ROWS); }
   private renderFooter(width: number): string[] {
@@ -347,8 +343,7 @@ export class FileSidebar {
         const createList = (maxVisible: number, selected?: string) => {
           const text = this.texts.menu;
           const items = [
-            ...(kind === "directory" ? [{ value: "toggle", label: text.toggle },
-              { value: "cd-here", label: text.cdHere }, { value: "cd-pick", label: text.cdPick }] : []),
+            ...(kind === "directory" ? [{ value: "toggle", label: text.toggle }] : []),
             ...(kind === "file" ? [{ value: "preview", label: text.preview }] : []),
             { value: "relative", label: text.relative }, { value: "absolute", label: text.absolute },
             ...(kind === "file" ? [{ value: "reference", label: text.reference },
@@ -391,24 +386,11 @@ export class FileSidebar {
       }, { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%" } });
       if (this.currentAction(id)) choice = result;
     });
-    if (choice === "cd-here" || choice === "cd-pick") this.sendCdBridgeCommand(choice === "cd-here" ? path : undefined);
-    else if (choice === "preview") await this.preview(path);
+    if (choice === "preview") await this.preview(path);
     else if (choice === "relative" || choice === "absolute") await this.copy(choice === "absolute", path);
     else if (choice === "reference") await this.reference(path);
     else if (choice === "external") await this.external(path);
     else if (choice === "toggle" && !this.disposed && this.host.canInteract) await this.tree.toggle(path);
-  }
-
-  private sendCdBridgeCommand(target?: string) {
-    if (this.disposed) return;
-    try {
-      if (!this.host.canInteract || !this.canSwitchDirectory || !this.sendCommand) throw new SidebarError("hostBusy");
-      if (!requireIdle(this.ctx)) throw new SidebarError("agentBusy");
-      if (target !== undefined) target = validateTarget(target, this.ctx.cwd);
-      const command = `/file-sidebar cd${target === undefined ? "" : ` ${encodeURIComponent(target)}`}`;
-      this.leaveForDirectoryCommand();
-      this.sendCommand(command);
-    } catch (error) { this.report(error); }
   }
 
   private input(data: string) {

@@ -4,7 +4,7 @@
 
 A native left-side file tree for Pi 1.5.0 fullscreen mode, backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.3.1 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. It provides `/cd` to switch the working directory while retaining the current session, `/cd-new` to start fresh, and `/cd-resume` to start fresh before opening the native session picker. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.1 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -47,7 +47,7 @@ The install directory is generated from the local versioned package. After insta
 
 The entry point is `extensions/index.ts`. The package only declares peerDependencies on the host and never ships a second copy of the Pi SDK.
 
-The development baseline is Pi **1.5.0**, with Pi **1.4.0** retained as the backward-compatibility target, on Node **24.22.2**, macOS Apple Silicon. Runtime and installation version checks accept stable **>=1.4.0** versions, with no upper-version pin; build metadata is allowed and prereleases/malformed versions are rejected. A passing version check is not a claim that every later host, platform, or terminal is verified: native layout, focus, and resume-action capability checks remain in place. Formal real-terminal acceptance is still pending. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
+The development baseline is Pi **1.5.0**, with Pi **1.4.0** retained as the backward-compatibility target, on Node **24.22.2**, macOS Apple Silicon. Runtime and installation version checks accept stable **>=1.4.0** versions, with no upper-version pin; build metadata is allowed and prereleases/malformed versions are rejected. A passing version check is not a claim that every later host, platform, or terminal is verified: native layout and focus capability checks remain in place. Formal real-terminal acceptance is still pending. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
 
 If required host capabilities disappear after mounting, the sidebar cancels width adjustment, closes its own overlays and yields the layout. It restores the original editor only when focus can still be read and set. If the layout setter is unavailable, its owned wrapper becomes a main-UI-only pass-through instead of calling the missing method; an explicit `off` can retry restoration after the capability returns. Foreign layouts/focus are not overwritten. The retired sidebar stays disabled until reload; if the host also loses its focus APIs, automatic focus restoration cannot be guaranteed.
 
@@ -62,90 +62,23 @@ If required host capabilities disappear after mounting, the sidebar cancels widt
 | `/file-sidebar width 32` | Set this runtime's width; integers 24–48; narrow windows hide the docked tree and clamp an open temporary overlay to fit |
 | `/file-sidebar lang zh`, `/file-sidebar lang en` | Switch the whole sidebar between Chinese and English and save the choice |
 | `/file-sidebar lang` | Show the current language and switching usage |
-| `/cd`, `/file-sidebar cd` | Open the same centered floating directory picker; keep this session when switching |
-| `/cd <encoded-path>`, `/file-sidebar cd <encoded-path>` | Switch directly; encode the whole path with `encodeURIComponent` |
-| `/cd-new [encoded-path]` | Pick a directory (or switch directly) and start an empty session; current directory: same as `/new` |
-| `/cd-resume [encoded-path]` | Pick a directory (or switch directly), start an empty session, then open native `/resume`; current directory: `/resume` only, no `/new` |
 | `/file-sidebar status` | Mode/mount or hide reason, width, focus, cache, pending reads, and current language |
 
 The default activation key is **Ctrl+Shift+E**. User keybindings are never modified; if your terminal cannot distinguish that key or another extension conflicts with it, use the commands. The same shortcut inside the tree returns to the Pi input box.
 
 Below the docked display threshold (97 columns at the default width), `/file-sidebar`, `/file-sidebar focus`, and Ctrl+Shift+E open a temporary overlay on the left. The conversation keeps its full layout width behind it. Esc, Ctrl+C, the activation key, or inserting a reference returns to the editor and removes the overlay. Menus, previews, and help return to the tree first. Enlarging the window restores the usual side-by-side layout. A focused docked tree switches to the temporary overlay when the window shrinks; an unfocused docked tree hides until you open it manually again. If help, the action menu, or a preview is open while the window shrinks, the modal is not cancelled: the tree becomes a temporary overlay that stays hidden until the modal closes, then reappears (or re-docks once the window is wide again). If the window drops below **26 columns × 8 rows**, the overlay closes and an open modal is still cancelled. The overlay clamps its displayed width to leave a divider and at least one conversation column visible, without changing the confirmed width.
 
-## Switch Working Directory
+## Independent Workspace Extension
 
-With a directory selected, Space includes these additional actions (after expand/collapse and before copy):
+Directory switching has moved entirely to **pi-cd-workspace**. This sidebar no longer registers `/cd`, `/cd-new`, `/cd-resume`, or the `/file-sidebar cd` alias, and directory menus no longer offer switching actions. Use `/cd` (picker) or `/cd <URI-encoded-path>` in the new extension instead. There is no command forwarding or dependency between the packages.
 
-| Directory action | Behavior |
-|---|---|
-| Switch to this directory, keep current session | Validate the selected directory and switch directly |
-| Select different working directory… | Open the same picker as `/cd`, starting at the current working directory |
+Either package can be installed alone, or both together. The sidebar owns `/file-sidebar`, Ctrl+Shift+E, its tree/layout and `file-sidebar.json`; the workspace extension owns the cd commands, its temporary picker and `cd-workspace.json`. Language settings are independent. Closing or changing the language of one does not close or reconfigure the other. A successful directory switch replaces the Pi session runtime normally; when installed, the sidebar is recreated from the new `ctx.cwd`, with its default width and its own saved language.
 
-File and symlink menus do not contain these actions. No new global shortcut is added. The ordinary file tree stays rooted at `ctx.cwd`; only the separate picker can browse parents and sibling projects.
+**Upgrade the sidebar installation to this split source before enabling pi-cd-workspace.** Older installed sidebar copies and legacy `cd-picker.ts` still register `/cd`; do not leave either active with the new extension. Editing source does not update an installed copy. No migration automatically edits global settings, session files, or old language preferences. For local co-loading without registering packages:
 
-### Picker keyboard and mouse controls
-
-Like file preview, the picker opens in a **centered, double-bordered floating window**, not a full-screen panel: 85% terminal width, at most 90% terminal height and 30 rows including the frame. The conversation remains visible around it. Directory columns have vertical separators; overlong names end in `…`. Selecting a truncated name opens the shared full-name bubble described below, which can extend beyond its column or the picker window without taking focus.
-
-Each column has its own right-edge position scrollbar once its list scrolls away from the top. It stays visible while idle, including in a still-visible parent column after entering a child, and hides when that column returns to the top or all rows fit. The thumb shows the visible portion and position in that column, not the active column's position. It is a position indicator only (no clicking or dragging); existing picker keys are unchanged. A visible bar reserves one text column, including for ellipsis and full-name detection (at a one-column width, text takes priority).
-
-Each column lists **directories first, then regular files**, sorted by name within each group. Files use the theme's dim color (even when selected) and have no trailing `/`. You can select a file to read its name or full-name bubble, but **Enter, → and `l` do nothing on files**: they do not enter, confirm, open or read the file. Only directories (including `.`) can be chosen as the working directory.
-
-| Picker input | Behavior |
-|---|---|
-| ↑ / ↓, j / k | Select a directory or file row; only held arrow keys accelerate at ~1.1s / ~2.6s (2 / 3 rows per repeat) |
-| ← | Go to the parent/previous column |
-| → / l | Enter the highlighted child directory; no action on files |
-| Left click (fullscreen) | Select a file only; select and enter a child directory; select `.` without confirming |
-| Mouse wheel (fullscreen) | Scroll the column under the pointer without changing selection, the active column, or focus |
-| . | Show/hide dot entries (files and directories) and `node_modules`, matching the file tree |
-| r | Return to the current workspace (`ctx.cwd` when the picker opened), without switching sessions |
-| [ / ] | Previous / next page of an overflowing full-name bubble; the selection stays put |
-| Enter | Select the highlighted directory; the `.` row selects this column's directory; no action on files |
-| Esc / Ctrl+C | Cancel without a session snapshot or backup |
-
-In fullscreen mode, left-click a row in any visible column, including a parent column. A file is only selected (with its full-name bubble if truncated); a directory is selected and opened in the next column. Clicking an earlier column discards its old descendant columns. Clicking `.` only selects that column's directory. **Clicks never confirm a working-directory/session switch**; press Enter to confirm. Headers, footers, separators, position bars, blank rows and loading/error messages are not selectable; hovering, right-clicking and dragging do not navigate. Regular TUI keeps keyboard-only navigation. This applies to all commands that share the picker, including `/cd-new` and `/cd-resume`.
-
-The mouse wheel scrolls only the visible list column under the pointer, including over its position bar; parent columns scroll independently without closing their descendants. It does not select or enter an item, switch sessions, or read directories. At either edge, and over the frame, header, footer, separators or loading/error states, wheel events do not reach the conversation. Scrolling a selected name out of view hides its bubble; keyboard selection movement reveals the selection again. Wheel events over a full-name bubble still scroll only that bubble.
-
-Press `r` from any browsed directory to return to the workspace: reset to one column, select its `.` row, clear scroll offsets and the name bubble, and keep the hidden-items toggle. The workspace column is reused when available; otherwise only that directory is read again. This is navigation only, not confirmation or refresh; the file tree's own `r` still refreshes and `h` still opens help. `h` no longer toggles hidden items in the picker.
-
-Held ↑/↓ acceleration applies to both directory and file rows, using the same ~1.1s / ~2.6s thresholds as the sidebar. Reversing direction, pausing longer than the release-reset window, or using a non-arrow action resets the next arrow movement to one row; `j` / `k` always move one row. It uses terminal key repeats only, with no extra timer or directory reads.
-
-The picker reads only entered directory levels asynchronously, never file contents. It does not recurse, watch, or follow symlink entries; symlinks and special entries remain omitted. Loading, no-visible-items and read-error states are distinct; a directory containing only files shows those files rather than an empty-directory message. It uses the sidebar language; `l` navigates here, not language switching. Names and paths are sanitized for display, not translated or changed on disk.
-
-Direct arguments are **URI-encoded paths**, not shell-quoted arguments: `/file-sidebar cd %2FUsers%2Fme%2FMy%20Project`. Encode the whole path once with `encodeURIComponent`; malformed encoding is rejected. Relative paths resolve against the current `ctx.cwd`; `~` and `~/…` are supported. Explicit targets are resolved with `realpath` (including symlinks) and must be directories with read/execute access. For `/cd`, picking the current real directory gives a no-op notice; `/cd-new` and `/cd-resume` follow the same-directory rules below. All three commands share the picker and path encoding. No shell is invoked.
-
-### Start fresh or resume
-
-| Command | Different real directory | Current real directory (including aliases/symlinks) |
-|---|---|---|
-| `/cd` | Keep the current session/history and restore draft text | Notice only |
-| `/cd-new` | New session ID and empty history in the target directory | Native `newSession()`, equivalent to `/new` |
-| `/cd-resume` | New empty session in the target directory, then native `/resume` picker | Open native `/resume` directly; do not create or replace a session first |
-
-The fresh commands do not copy the old conversation, branches, summaries, session name, extension entries, parent-session link, or draft into a different directory. They do not archive or modify the original session file; it remains available for normal recovery. New workspace resources still load under Pi's trust rules. No session is automatically selected for resume: choose one in Pi's native picker. Cancelling that picker after a cross-directory switch leaves the new empty session active; cancelling it in the same directory keeps the original session. Cancelling the directory picker does neither.
-
-The Pi 1.4.0 / 1.5.0 extension `newSession()` API cannot take a cwd. Cross-directory fresh commands therefore create a private, exclusive JSONL containing only a new session header and pass it to `switchSession()`; host lifecycle events label this replacement `resume`, although its ID and conversation are new. Default storage follows the target directory; explicitly configured storage stays in place. Same-directory `/cd-new` uses `newSession()` directly, without a staging file. Cross-directory switching requires persistence; same-directory new/resume also works with an in-memory session.
-
-`/cd-resume` invokes the current host editor's registered resume action, not `sendUserMessage("/resume")` (which would not dispatch that built-in command). Pi owns the list, search, scope, rename/delete controls and subsequent selection/cancellation. If a custom editor does not expose the native action or a modal/busy state blocks it, the extension reports a warning/error instead of sending text to the model. After a successful cross-directory takeover, failure to open the list leaves the new session active; return to the main editor and run `/resume` manually.
-
-All directory commands require **Pi >=1.4.0 TUI**, idle processing, no queued messages, and no blocking modal/external editor/width adjustment. They work in regular TUI too, where the sidebar stays hidden; non-TUI modes are silent. They share one in-flight directory-picker/switch lock. New runtime creation resets sidebar width to **32** and keeps successfully saved language preferences. A cancelled or catchable failed cross-directory takeover quarantines the staged empty session as `.cd-abandoned`, without touching the original. The fatal-runtime limitation below applies to fresh switching too; it is not a promise of automatic UI rollback.
-
-### Existing `/cd` session and failure semantics
-
-- `/cd` additionally requires session persistence.
-- The menu closes and returns focus before sending `/file-sidebar cd …` with explicit `expandPromptTemplates: true`. This is command dispatch, not a chat prompt; it neither submits the draft nor asks the model to change directories.
-- A private, exclusively created JSONL snapshot retains the session ID, header metadata, all entries/branches, and active leaf. A non-model `cd-picker` marker records `{ from, to }`. Default session storage moves to the target's session directory; an explicitly configured session directory is retained. This does **not** resume the target project's previous session.
-- Pi replaces the runtime and reloads cwd-bound resources (including AGENTS.md) under its normal trust rules. The old sidebar/editor runtime is disposed; the new tree uses the new root and width **32**. Successfully saved language preferences survive. This is different from leaving tree focus, which preserves the original editor object.
-- Draft text is captured before replacement and restored only through the fresh `withSession` context. **Cursor position is not guaranteed**; a restoration error warns rather than pretending success.
-- After verified takeover, the source file is renamed to `source.cd-backup`; existing backup names get a UUID suffix. A not-yet-flushed source need not have a file to archive. `EXDEV` falls back to exclusive copy and keeps the source, with a warning. Other archive failures warn and preserve the source; the new session remains active.
-- A cancelled host switch or a catchable pre-takeover failure renames the target copy to `.cd-abandoned` (UUID on collision), never deletes it, and keeps the original. Failed partial writes are also quarantined if possible. If the rename fails, the surviving `.jsonl` path is reported for manual handling. `.cd-backup` and `.cd-abandoned` do not appear in `/resume`.
-- **Host limitation:** Pi 1.4.0 may destroy the old runtime before creating the replacement; its interactive fatal-error handler can call `process.exit(1)` before this extension's catch runs. No UI recovery or automatic `.cd-abandoned` rename is promised on that path (or on process termination). Both paths are displayed before switching; the original is not archived before takeover, but the target may remain `.jsonl`. Restart Pi with `pi --session '/absolute/path/to/original.jsonl'` or select the original with `/resume`. Inspect and move the unused copy manually only after confirming it is not active. No process-exit interception or private host patch is installed.
-
-### Upgrading from the standalone cd-picker
-
-Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both register `/cd`. First test source with `pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen`. After real-terminal acceptance, back up the standalone extension and current installation, install 0.3.1, move the old extension to `cd-picker.ts.disabled`, then `/reload` and check for command conflicts. Source development does not perform installation, disabling, or global configuration changes. Keep those backups for manual rollback.
+```bash
+pi --no-extensions -e ./extensions/index.ts -e ../pi-cd-workspace/extensions/index.ts --tui-mode fullscreen
+```
 
 ## Keyboard and Mouse
 
@@ -168,7 +101,7 @@ Do not load `~/.pi/agent/extensions/cd-picker.ts` alongside this version: both r
 | [ / ] | Page the full-name bubble when its content overflows; does not move the tree selection |
 | Esc / Ctrl+C | Return to the original Pi input object and retract a temporary overlay; drafts are kept and the agent is not interrupted |
 
-Once the file/directory action menu is open, **Enter or Space** executes the highlighted action through the same checks; clicking still works. This Space-to-confirm alias applies **only to this action menu**. In the tree, Space still opens the menu; the main editor, directory picker, preview, help, width adjustment and Pi's own dialogs keep their existing key behavior. No global keybindings are changed.
+Once the file/directory action menu is open, **Enter or Space** executes the highlighted action through the same checks; clicking still works. This Space-to-confirm alias applies **only to this action menu**. In the tree, Space still opens the menu; the main editor, preview, help, width adjustment and Pi's own dialogs keep their existing key behavior. No global keybindings are changed.
 
 Single clicks only select; double-clicking the same file previews it. Directory expansion markers are clickable. The mouse wheel only scrolls the sidebar, never steals focus on hover, and wheel events at the edge never leak to the main conversation. In both docked and floating trees, the position scrollbar stays visible while the list is scrolled away from the top: it no longer fades after a pause. Returning to the top restores the host's short auto-hide delay; the bar hides immediately when all rows fit. Hovering/dragging can still reveal it at the top. The scrollbar supports dragging; files and the divider are not draggable.
 
@@ -176,9 +109,9 @@ Single clicks only select; double-clicking the same file previews it. Directory 
 
 ## Full-name Bubbles
 
-The directory picker and the left file tree share the same name-tooltip component. When the focused selection's name is truncated, a **non-focus-stealing rounded bubble** automatically shows the full name. It can be wider than the sidebar or a picker column and temporarily cover part of the conversation, without changing either layout. Bubble width is capped at 80 columns and height at 12 rows, further constrained to fit inside the terminal.
+The focused file tree uses a name-tooltip component. When the focused selection's name is truncated, a **non-focus-stealing rounded bubble** automatically shows the full name. It can be wider than the sidebar and temporarily cover part of the conversation, without changing either layout. Bubble width is capped at 80 columns and height at 12 rows, further constrained to fit inside the terminal.
 
-Names wrap by terminal display width. If a narrow/short terminal cannot show all lines at once, use **`[` / `]`** to page, or scroll the mouse wheel over the bubble; every line remains reachable. These inputs only scroll the bubble, not the tree selection or conversation. Normal tree PageUp/PageDown still belongs to the conversation. The bubble does not capture keyboard focus; Esc retains the owning tree/picker's existing exit behavior.
+Names wrap by terminal display width. If a narrow/short terminal cannot show all lines at once, use **`[` / `]`** to page, or scroll the mouse wheel over the bubble; every line remains reachable. These inputs only scroll the bubble, not the tree selection or conversation. Normal tree PageUp/PageDown still belongs to the conversation. The bubble does not capture keyboard focus; Esc retains the tree's existing exit behavior.
 
 Changing to a name that fits, leaving tree focus, opening a modal, resizing the sidebar, hiding/disposal, or scrolling the selected row out of view retracts the tree's bubble. Window resizing repositions and wraps the tooltip inside terminal bounds. File names are sanitized but never translated; displaying a tip performs no file-content reads, directory rescan, timer-driven marquee, or polling.
 
@@ -192,9 +125,9 @@ First use defaults to **Chinese**, with full sidebar Chinese/English switching:
 /file-sidebar lang      Show the current language
 ```
 
-Press lowercase `l` while the tree has focus or inside the `h` help for a quick toggle; the extended key protocol is supported. `l:EN` / `l:ZH` in the title indicates the key and the target language. Width adjustment, the action menu, preview, and other blocking modals do not capture that single key; the directory picker uses `l` to enter a child. `l` in the main input box remains ordinary input, and Pi keybindings are never modified.
+Press lowercase `l` while the tree has focus or inside the `h` help for a quick toggle; the extended key protocol is supported. `l:EN` / `l:ZH` in the title indicates the key and the target language. Width adjustment, the action menu, preview, and other blocking modals do not capture that single key. `l` in the main input box remains ordinary input, and Pi keybindings are never modified.
 
-- Translation scope: tree title and status, bottom hint, width hints, action menu, directory picker and switching feedback, help table, preview hints, command feedback, and errors defined by this extension. Command/shortcut registration descriptions use fixed bilingual text; the Pi main UI does not switch along.
+- Translation scope: tree title and status, bottom hint, width hints, action menu, help table, preview hints, command feedback, and errors defined by this extension. Command/shortcut registration descriptions use fixed bilingual text; the Pi main UI does not switch along.
 - **File names, paths, and file contents are never translated**; copy, reference, and external editor actions still use the raw path. Low-level system/third-party errors keep their original diagnostics, sanitized for display.
 - Switching redraws immediately without rebuilding the tree, ScrollView, or main editor, without re-reading directories or file contents, and without changing tree selection, confirmed width, focus, or drafts. The help table re-wraps in the new language; the scroll offset is kept and clamped to the valid range.
 
@@ -241,7 +174,7 @@ The default is 32 columns with a 1-column divider. Docked display keeps at least
 
 ## File Actions and Security Boundaries
 
-The read-only preview, directory picker, Space action menu, and `h` key help all use a double-line border whose color follows the current theme; the main file tree and main conversation layout are unchanged.
+The read-only preview, Space action menu, and `h` key help all use a double-line border whose color follows the current theme; the main file tree and main conversation layout are unchanged.
 
 ### Read-only Preview
 
@@ -253,7 +186,7 @@ Copying uses Pi's public `copyToClipboard()` with the raw path characters, never
 
 References re-validate the regular file before the action, insert at the current cursor via `pasteToEditor()`, and add boundary spaces on both sides. For example `@src/a.ts`, `@"docs/design notes.md"`. Paths containing quotes or backslashes are JSON-string encoded, reversibly; paths with control characters are explicitly rejected for reference — use copy instead. Directories and symlinks are never inserted as file references.
 
-A reference is draft text only, not an attachment upload; file actions never read contents into context or submit the draft. The only `sendUserMessage` call is the explicit directory-menu command bridge above, with command expansion enabled; the native resume action uses no message bridge and no model API is called.
+A reference is draft text only, not an attachment upload; file actions never read contents into context or submit the draft. No `sendUserMessage` bridge or model API is used.
 
 ### External Editor
 
@@ -271,7 +204,7 @@ Pi must be idle; state is re-checked right before launch. The TUI is stopped fir
 
 Refresh sources: first show/expand, manual refresh, re-entering the tree, successful write/edit/bash, and returning from the external editor. Tool events only mark dirty with a 40ms debounce; per-directory single-flight; new dirty marks during a read are never lost. Hidden or collapsed directories pause active reads; results from stale runtimes or removed nodes are discarded.
 
-**There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above. Explicit directory commands additionally write Pi session files as described above; only history-preserving `/cd` archives the original, and none moves project files.
+**There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above. The only writes owned by the sidebar are its language preference; it does not write or archive Pi session files.
 
 ## Development
 
@@ -283,39 +216,29 @@ npm run typecheck
 node --import tsx --test tests/*.test.ts
 ```
 
-The automated regressions cover session snapshots, injected filesystem/replacement failures, picker navigation, command registration/encoding, and the host renderer/input routing with an in-memory terminal. Run the same checks against both Pi 1.5.0 (development dependencies) and Pi 1.4.0 (an isolated dependency tree) when changing host compatibility. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
+The automated regressions cover sidebar command registration, menus, language, and host renderer/input routing with an in-memory terminal. Run the same checks against both Pi 1.5.0 (development dependencies) and Pi 1.4.0 (an isolated dependency tree) when changing host compatibility. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
 
-### Live Acceptance for Directory Switching (Not Yet Done)
+### Live Acceptance for Independent Extensions (Not Yet Done)
 
-Run the following live-acceptance sections on **both Pi 1.5.0 and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance.
+Split validation passes on Pi 1.4.0 and 1.5.0: source/test type checks, local regressions, and unpacked-package loading. The companion workspace tests exercise both load orders, fullscreen/regular modes, separate language preferences, and modal/focus isolation with real host components and an in-memory terminal. The background PTY attempt was blocked before Pi started (`os.openpty`: `Operation not permitted`), so real-terminal session replacement/reload remains unverified after the split.
 
-Use disposable projects and an isolated `PI_CODING_AGENT_DIR` for failure tests; never corrupt active session files to simulate errors.
+Run the live-acceptance sections on **both Pi 1.5.0 and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance. Use disposable projects and an isolated `PI_CODING_AGENT_DIR`.
 
-- Test `/cd`, `/file-sidebar cd`, `/cd-new`, `/cd-resume`, and both directory menu actions in 80- and 120-column windows, in Chinese and English. Include children, parent/sibling projects, `~/…`, Chinese names, spaces, quotes and `%`.
-- For `/cd-new` across directories, check the new ID, empty conversation/draft, unchanged original session file, target resources/trust and storage. For `/cd-resume`, check that same empty target session exists before the native picker opens; select a saved target session, or cancel and stay in the empty target session. No command text may reach the model.
-- Choose the current directory (also via `.`, a relative alias and a symlink): `/cd` stays unchanged, `/cd-new` creates exactly one new session, and `/cd-resume` opens the native picker without new/session replacement events. Cancelling same-directory resume preserves the original session. Repeat same-directory cases with `--no-session`.
-- Check that `/cd` is centered with the conversation visible around its frame; resize it and verify column separators, ellipses, footer and bottom border. Select long names in both the picker and file tree: the bubble may extend past the sidebar, but must stay on-screen and keep keyboard focus on the owner. Test tooltip paging/wheel without changing selection or scrolling the conversation, and modal/exit cleanup.
-- Scroll several `/cd` columns to different positions and pause for at least 5 seconds: each visible column must retain its own thumb, including inactive parents. Returning a column to the top, pressing `r`, or making all its rows fit must hide its bar. Check the last column, narrow/short windows, hidden-item reloads, and full-name bubbles for names that only become truncated by the bar; scrolling/rendering must not add directory reads.
-- Wheel-scroll the active and visible parent columns separately (including over their position bars); keep selection, active column, descendant columns and focus unchanged. Check rapid wheel events, top/bottom boundaries, short/empty/loading/error columns, frame/header/footer/separators, resize, hidden-item reloads and click-after-scroll accuracy. No wheel event inside the picker may scroll the conversation or read a directory. A selected name's bubble must hide when scrolled out of view; keyboard selection must become visible again, with held-arrow acceleration reset.
-- In fullscreen, click file, directory and `.` rows in the active and visible parent columns: files only select, directories select and enter once, `.` only selects, and no click switches sessions. Check independent column scroll offsets, horizontally clipped columns after narrowing, wrapped bilingual footers, blank/loading/error rows, separators and position bars; none may target an unintended row. Hover/right-click/drag must not navigate, and the next held-arrow movement after a click starts at one row. Repeat through `/cd-new` and `/cd-resume`; regular TUI retains keyboard navigation.
-- In a picker column containing both directories and files, verify directories sort first, files stay dim without `/` even when selected, and Enter/→/`l` on a file neither closes the picker nor enters/opens it or switches sessions. Test files-only and empty directories, hidden files via `.`, long/control-character names, and omitted symlinks. `.` and directory confirmation must still work.
-- Hold ↑/↓ across directory and file rows: verify 1/2/3-row steps at ~1.1s / ~2.6s, selection visibility at scroll boundaries, and one-row movement after reversing direction, releasing/pausing, ignored file confirmation, entering/leaving a column or returning with `r`. `j`/`k` remain single-step; scrolling or ignored file actions must not reread directories.
-- Verify `.` and a single Chinese full stop `。` both toggle hidden items in the tree and picker; no extra UI hint is added for the alias. In the picker, navigate to parents, siblings and descendants, then press `r`: it must return to the workspace's `.` row without confirming, preserve the hidden toggle, and discard late results from abandoned columns.
-- Compare `/session` before/after: same ID and message history, new cwd; inspect the target root/status, target trust prompt and resource reload. Saved language must survive; sidebar width resets to 32.
-- Leave a draft, switch via a menu, and verify its text survives (not necessarily its cursor). A subsequent reference must use the new root; the bridge must not add a user message to the transcript.
-- Cancel each directory picker, choose the current directory with `/cd`, and try nonexistent/unreadable targets: no snapshot/backup should be created. Exercise rapid mixed requests, streaming, queued messages, help/preview and external-editor blocking, and reload while a picker/read/save is pending.
-- Check `.cd-backup` on success and `.cd-abandoned` on a cancelled/catchable failed takeover; neither belongs in `/resume`. Inject archive errors only in disposable tests: the new session should remain active and the original survive.
-- Exercise the documented fatal-runtime limitation: original session remains recoverable, but Pi may exit and leave an unclaimed `.jsonl`. Repeat source acceptance after installation and verify the old standalone extension is disabled and `/cd` is unambiguous.
+- Load each extension alone and both together in either order. Commands must be unambiguous; directory menus must not contain cd actions.
+- Open/cancel `/cd` at 80 and 120 columns: keep the sidebar root, selection, width, language, editor draft and focus unchanged. The picker must not allow Ctrl+Shift+E to steal focus or leak wheel events to the conversation.
+- Independently change both languages, disable/re-enable the sidebar, and reload. A sidebar `off` must not cancel the workspace picker; picker shutdown must not close sidebar-owned UI.
+- Switch directories using all three workspace commands and verify that Pi rebuilds the sidebar from the target cwd. Sidebar settings and resources remain its own; switching/cancellation must not add command text to model context.
+- Exercise sidebar help/preview/width adjustment and external-editor blocking; cd must refuse to take over another component's focus. Detailed cd acceptance belongs in pi-cd-workspace.
 
 ### Live Acceptance for Narrow Windows (Not Yet Done)
 
 - At 80×24, confirm the tree starts hidden. Open it with the command and shortcut; check the conversation remains full width behind the left overlay. Esc, Ctrl+C, and the shortcut must retract it and preserve the original draft/cursor.
 - In both docked and floating trees, verify the selected path plus two complete hint rows at widths 24/31/32/48, in Chinese and English. The two full hint rows each use 32 display columns; narrower widths keep all six keys. At terminal heights 8/12/24, check that exactly height − 5 file rows fit, End/arrow movement reveals the last row, footer clicks do not select hidden files, and footer wheel events never scroll the conversation. Width adjustment must not change the tree height or trigger directory reads.
 - Open help, the menu, and a file preview; close each back to the same tree selection, then leave the tree. Insert a reference and confirm it returns to the unobstructed editor without sending.
-- In file and directory action menus, confirm with both Enter and Space (including extended terminal key sequences); verify identical selection/cancel behavior and rejection of a busy external editor. Check the bilingual footer/help. Space must still only open the menu from the tree, and must not confirm the directory picker, close preview/help, confirm width adjustment, or change Pi's own dialogs.
+- In file and directory action menus, confirm with both Enter and Space (including extended terminal key sequences); verify identical selection/cancel behavior and rejection of a busy external editor. Check the bilingual footer/help. Space must still only open the menu from the tree, and must not close preview/help, confirm width adjustment, or change Pi's own dialogs.
 - Scroll, click after scrolling, double-click a file, drag the scrollbar, and check wheel boundaries. In both docked and floating trees, move below the first visible page and wait at least 5 seconds: the thumb must remain visible. Arrow back to the top or press Home: the bar must auto-hide after the host's short delay unless hovered/dragged. Also test collapse, resize until all rows fit, off/on, and focus changes without losing the scroll position. PageUp/PageDown must still page the conversation under ordinary tree focus.
 - Test 26/40/80/96/97/120 columns, short windows, width confirmation/cancel, off/on, reload, and another extension taking over the root. Enlarging restores the docked layout; a focused docked tree shrinks into the floating overlay, an unfocused one hides. Test both languages and wide file names.
-- In both the file tree and `/cd`, repeatedly shrink from 120 columns through 97/96/80/40/26, then enlarge again. At each width, use ↑/↓ to alternate between a truncated long name and a short name. The bubble must appear/disappear without a `name-tooltip` geometry exception, stale content or lost focus. Also close/disable the sidebar with a bubble visible and confirm no overlay remains.
+- In the file tree, repeatedly shrink from 120 columns through 97/96/80/40/26, then enlarge again. At each width, use ↑/↓ to alternate between a truncated long name and a short name. The bubble must appear/disappear without a `name-tooltip` geometry exception, stale content or lost focus. Also close/disable the sidebar with a bubble visible and confirm no overlay remains.
 - With help, the menu, or a preview open, shrink and then enlarge the window: the modal must not be cancelled, and closing it returns to the floating tree or the docked layout.
 
 ### Live Acceptance for the External Editor (Not Yet Done)

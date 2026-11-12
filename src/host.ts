@@ -1,6 +1,5 @@
 import { VERSION, type CustomEditor, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HStack, isViewportTUI, truncateToWidth, type Component, type OverlayHandle, type TUI } from "@earendil-works/pi-tui";
-import { SidebarError } from "./i18n.ts";
 import { isSupportedPiVersion } from "./compat.ts";
 
 type NativeTUI = TUI & { layoutRoot?: Component; getFocusedComponent(): Component | null };
@@ -25,27 +24,6 @@ function contains(root: Component | undefined, target: Component | null): boolea
     if (Array.isArray(children)) pending.push(...children);
   }
   return false;
-}
-
-// 内置 /resume 不走 sendUserMessage；同步探针取得当前编辑器已注册的原生动作。
-// 不安装第二个选择器、不模拟按键；探针在执行动作前移除，不缓存跨会话的 editor/TUI。
-export function openNativeResume(ctx: ExtensionContext): void {
-  if (!isSupportedPiVersion(VERSION) || ctx.mode !== "tui" || !ctx.hasUI) throw new SidebarError("switchTuiOnly");
-  let tui: NativeTUI | undefined;
-  const key = "pi-file-sidebar:resume-probe";
-  try {
-    ctx.ui.setWidget(key, (native) => {
-      tui = native as NativeTUI;
-      return { render: () => [], invalidate() {} };
-    }, { placement: "belowEditor" });
-  } finally { ctx.ui.setWidget(key, undefined); }
-  const editor = getFocus(tui) as Partial<CustomEditor> | null;
-  const resume = editor?.actionHandlers instanceof Map ? editor.actionHandlers.get("app.session.resume") : undefined;
-  if (!tui || typeof tui.hasOverlay !== "function" || tui.hasOverlay() || typeof resume !== "function" || typeof editor?.onAction !== "function"
-    || typeof editor.getText !== "function" || typeof editor.setText !== "function"
-    || (editor.getExpandedText?.() ?? editor.getText()) !== ctx.ui.getEditorText()) throw new SidebarError("resumeUnavailable");
-  ctx.ui.setEditorText("");
-  resume();
 }
 
 export class SidebarHost {
@@ -91,10 +69,6 @@ export class SidebarHost {
   get visible() {
     return this.alive && this.enabled && !!this.wrapper && this.raw?.layoutRoot === this.wrapper
       && this.raw.mode === "fullscreen" && this.raw.terminal.rows >= 8 && (this.docked || (this.floating && this.fitsOverlay));
-  }
-  get canOpenModal() {
-    return this.alive && !!this.raw && !this.blocked && !this.paused && typeof this.raw.hasOverlay === "function"
-      && (!this.raw.hasOverlay() || this.focused);
   }
   get canInteract() {
     const focus = getFocus(this.raw);
