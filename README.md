@@ -2,9 +2,9 @@
 
 **[English](README.md)** | [简体中文](README.ZH.md)
 
-A native left-side file tree for Pi 1.5.0 fullscreen mode, backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
+A native left-side file tree for Pi >=1.5.0 fullscreen mode (verified on 1.5.0 and 1.5.2), backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.3.2 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.2 targets Pi >=1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -216,13 +216,13 @@ npm run typecheck
 node --import tsx --test tests/*.test.ts
 ```
 
-The automated regressions cover sidebar command registration, menus, language, and host renderer/input routing with an in-memory terminal. Run the same checks against both Pi 1.5.0 (development dependencies) and Pi 1.4.0 (an isolated dependency tree) when changing host compatibility. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
+The automated regressions cover sidebar command registration, menus, language, and host renderer/input routing with an in-memory terminal. Run the same checks against Pi 1.5.0 (development baseline), 1.5.2 (current host), and Pi 1.4.0 (backward compatibility) in isolated dependency trees when changing host compatibility. All three pass source/test type checks and 58 local regressions. A real InteractiveMode with an in-memory terminal also passes four-extension co-loading in two orders, focus restoration, reload, and session replacement on all three versions. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
 
 ### Live Acceptance for Independent Extensions (Not Yet Done)
 
 Split validation passes on Pi 1.4.0 and 1.5.0: source/test type checks, local regressions, and unpacked-package loading. The companion workspace tests exercise both load orders, fullscreen/regular modes, separate language preferences, and modal/focus isolation with real host components and an in-memory terminal. The background PTY attempt was blocked before Pi started (`os.openpty`: `Operation not permitted`), so real-terminal session replacement/reload remains unverified after the split.
 
-Run the live-acceptance sections on **both Pi 1.5.0 and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance. Use disposable projects and an isolated `PI_CODING_AGENT_DIR`.
+Run the live-acceptance sections on **Pi 1.5.0, Pi 1.5.2, and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance. Use disposable projects and an isolated `PI_CODING_AGENT_DIR`.
 
 - Load each extension alone and both together in either order. Commands must be unambiguous; directory menus must not contain cd actions.
 - Open/cancel `/cd` at 80 and 120 columns: keep the sidebar root, selection, width, language, editor draft and focus unchanged. The picker must not allow Ctrl+Shift+E to steal focus or leak wheel events to the conversation.
