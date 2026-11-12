@@ -4,7 +4,7 @@
 
 A native left-side file tree for Pi 1.5.0 fullscreen mode, backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.3.1 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.2 targets Pi 1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -40,7 +40,7 @@ The script requires the development dependencies to be installed (run `npm insta
 An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.1
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.2
 ```
 
 The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.

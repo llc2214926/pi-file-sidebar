@@ -4,7 +4,7 @@
 
 Pi 1.5.0 fullscreen 内的原生左侧文件树，向后兼容 Pi 1.4.0。宽窗口右侧保留 Pi 主界面、编辑器和原生对话滚动。窄窗口默认隐藏文件树，手动打开后临时覆盖会话左侧，返回输入框时收起；复用宿主 renderer。
 
-0.3.1 面向 Pi 1.5.0，宿主最低版本为 **>=1.4.0**。工作目录切换已完整迁移到独立的 **pi-cd-workspace** 扩展，本包仅提供文件侧栏。正式 TUI 实机验收尚未完成。
+0.3.2 面向 Pi 1.5.0，宿主最低版本为 **>=1.4.0**。工作目录切换已完整迁移到独立的 **pi-cd-workspace** 扩展，本包仅提供文件侧栏。正式 TUI 实机验收尚未完成。
 
 ## 安装
 
@@ -40,7 +40,7 @@ Pi 会把整个仓库克隆到 `~/.pi/agent/git/github.com/llc2214926/pi-file-si
 已解包的版本也可以手动注册：
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.1
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.2
 ```
 
 该安装目录由本地版本包生成。安装后在当前 Pi 执行 `/reload` 或重启 Pi。运行时使用独立安装副本，不依赖源码仓库，不需要 npm 账号。
