@@ -25,5 +25,4 @@ artifacts/
 test/
 tests/
 evidence/
-package-lock.json
 AGENTS.md
