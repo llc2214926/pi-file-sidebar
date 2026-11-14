@@ -95,6 +95,7 @@ export class FileTree {
     if (this.nodes.get(path)?.kind !== "directory" || this.disposed || !this.rows().some((row) => row.node.path === path)) return;
     if (!this.expanded.has(path)) { this.expanded.add(path); this.changed(); }
     await this.load(path);
+    this.resumeLoads();
   }
   collapse(path = this.current) {
     if (this.expanded.delete(path)) {
@@ -130,9 +131,15 @@ export class FileTree {
   }
   markDirty(paths: readonly string[] = this.loadedDirectories()) {
     if (this.disposed) return;
-    for (const path of paths) {
-      const node = this.nodes.get(path);
-      if (node?.kind === "directory" && node.state !== "unloaded") this.dirty.add(path);
+    for (const source of paths) {
+      let path = resolve(this.root, source);
+      // write 可以新建多层父目录；向上找到已加载的目录，之后仍由可见性决定是否读取。
+      while (isWithin(this.root, path)) {
+        const node = this.nodes.get(path);
+        if (node?.kind === "directory" && node.state !== "unloaded") { this.dirty.add(path); break; }
+        if (path === this.root) break;
+        path = dirname(path);
+      }
     }
     this.schedule();
   }

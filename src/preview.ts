@@ -20,19 +20,22 @@ export interface PreviewData {
 }
 
 export async function readPreview(root: string, path: string): Promise<PreviewData> {
-  const actual = await validateFile(root, path);
-  const file = await open(actual, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const expected = await validateFile(root, path);
+  const file = await open(expected.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    const info = await file.stat();
-    if (!info.isFile()) throw new SidebarError("fileChanged");
-    const bytes = Buffer.alloc(Math.min(MAX_PREVIEW_BYTES, info.size));
+    const info = await file.stat({ bigint: true });
+    if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino) throw new SidebarError("fileChanged");
+    // O_NOFOLLOW 只保护最后一级；打开后重验原路径，拒绝父目录替换及已脱离路径的句柄。
+    const current = await validateFile(root, path);
+    if (current.path !== expected.path || current.dev !== info.dev || current.ino !== info.ino) throw new SidebarError("fileChanged");
+    const bytes = Buffer.alloc(Number(info.size > BigInt(MAX_PREVIEW_BYTES) ? BigInt(MAX_PREVIEW_BYTES) : info.size));
     let bytesRead = 0;
     while (bytesRead < bytes.length) {
       const read = await file.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
       if (!read.bytesRead) break;
       bytesRead += read.bytesRead;
     }
-    const source = bytes.subarray(0, bytesRead), truncated = info.size > bytesRead;
+    const source = bytes.subarray(0, bytesRead), truncated = info.size > BigInt(bytesRead);
     const result: PreviewData = { path: relative(root, path), text: "", lines: [], bytesRead, truncated };
     if (source.includes(0)) return { ...result, message: "binary" };
     let text: string;

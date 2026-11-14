@@ -60,7 +60,7 @@ export class NameTooltip implements Component {
     else {
       const mount: TipMount = { layout: this.layout };
       this.mount = mount;
-      // Pi 1.4.0 会先快照可见 entry；下层 render 收起气泡后，本帧仍可能读取旧 getter。
+      // Pi 1.5.0 仍先快照可见 entry；下层 render 收起气泡后，本帧仍可能读取旧 getter。
       // 每次挂载保留自己的有效布局，旧组件退休后不绘制、不接管新一轮气泡的事件。
       mount.handle = this.tui.showOverlay({
         render: (width) => this.mount === mount ? this.render(width) : [],

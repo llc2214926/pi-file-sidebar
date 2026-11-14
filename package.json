@@ -1,8 +1,8 @@
 {
   "name": "pi-file-sidebar",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
-  "description": "Pi 1.5.0 原生文件树，兼容 1.4.0；工作目录切换由独立 pi-cd-workspace 扩展提供",
+  "description": "Pi >=1.5.0 原生文件树；工作目录切换由独立 pi-cd-workspace 扩展提供",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",

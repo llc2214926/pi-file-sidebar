@@ -28,11 +28,15 @@ const zh = {
   copiedAbsolute: "已复制绝对路径",
   editorExit: (code: number) => `编辑器退出码：${code}`,
   editorFinished: "编辑器进程已结束；GUI 启动器没有等待参数时，不代表文件已编辑完毕",
-  directoryError: (code?: string) => code === "EACCES" || code === "EPERM" ? "没有读取权限" : code === "ENOENT" ? "目录已消失"
-    : code === "ELOOP" ? "目录为符号链接，未读取" : `读取失败${code ? `：${code}` : ""}`,
+  directoryError: (code?: string) => {
+    if (code === "EACCES" || code === "EPERM") return "没有读取权限";
+    if (code === "ENOENT") return "目录已消失";
+    if (code === "ELOOP") return "目录为符号链接，未读取";
+    return code ? `读取失败：${code}` : "读取失败";
+  },
   host: {
     disposed: "已卸载",
-    incompatible: "宿主不兼容：需要 Pi >=1.4.0 及原生焦点/布局能力",
+    incompatible: "宿主不兼容：需要 Pi >=1.5.0 及原生焦点/布局能力",
     closed: "用户已关闭",
     regular: "仅 fullscreen 模式显示",
     waiting: "等待宿主布局",
@@ -129,7 +133,7 @@ const zh = {
     editorEmpty: "编辑器命令不能为空",
     editorSettingsRead: "无法读取编辑器设置",
     editorSettingsInvalid: "编辑器设置无效，请检查 Pi settings.json",
-    fileChanged: "目标已不是普通文件",
+    fileChanged: "目标文件或目录路径已变化，请重试",
     editorBusy: "Pi 正在工作，不能启动外部编辑器；请等待空闲",
     editorBusyChanged: "Pi 已开始工作，取消编辑器启动",
     editorTerminated: "编辑器进程已被终止",
@@ -165,11 +169,15 @@ const en: typeof zh = {
   copiedAbsolute: "Absolute path copied",
   editorExit: (code) => `Editor exit code: ${code}`,
   editorFinished: "Editor process ended; without a wait flag, a GUI launcher exiting does not mean editing is finished",
-  directoryError: (code) => code === "EACCES" || code === "EPERM" ? "Permission denied" : code === "ENOENT" ? "Directory no longer exists"
-    : code === "ELOOP" ? "Directory is a symlink; not read" : `Read failed${code ? `: ${code}` : ""}`,
+  directoryError: (code) => {
+    if (code === "EACCES" || code === "EPERM") return "Permission denied";
+    if (code === "ENOENT") return "Directory no longer exists";
+    if (code === "ELOOP") return "Directory is a symlink; not read";
+    return code ? `Read failed: ${code}` : "Read failed";
+  },
   host: {
     disposed: "Unloaded",
-    incompatible: "Incompatible host: requires Pi >=1.4.0 and native focus/layout capabilities",
+    incompatible: "Incompatible host: requires Pi >=1.5.0 and native focus/layout capabilities",
     closed: "Disabled by user",
     regular: "Only visible in fullscreen mode",
     waiting: "Waiting for host layout",
@@ -266,7 +274,7 @@ const en: typeof zh = {
     editorEmpty: "The editor command cannot be empty",
     editorSettingsRead: "Could not read editor settings",
     editorSettingsInvalid: "Invalid editor settings; check Pi settings.json",
-    fileChanged: "The target is no longer a regular file",
+    fileChanged: "The file or its directory path changed; retry the action",
     editorBusy: "Pi is working; wait until it is idle before opening an external editor",
     editorBusyChanged: "Pi started working; editor launch cancelled",
     editorTerminated: "The editor process was terminated",
@@ -290,6 +298,7 @@ export class SidebarError extends Error {
 }
 
 export function describeError(error: unknown, language: Language): string {
-  return error instanceof SidebarError ? getMessages(language).errors[error.code]
-    : error instanceof Error ? error.message : String(error);
+  if (error instanceof SidebarError) return getMessages(language).errors[error.code];
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

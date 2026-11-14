@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative } from "node:path";
 import { getSelectListTheme, type ExtensionContext, type ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Container, ScrollView, SelectList, TruncatedText, VStack, matchesKey, truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { copyPath, formatReference, parseEditorCommand, readEditorCommand, validateFile } from "./actions.ts";
+import { copyPath, formatReference, parseEditorCommand, readEditorCommand, resolveToolPath, validateFile } from "./actions.ts";
 import { ACTIVATE, SidebarHost } from "./host.ts";
-import { FileTree, displayText, isWithin } from "./tree.ts";
+import { FileTree, displayText, isWithin, type TreeRow } from "./tree.ts";
 import { readPreview, TextPreview } from "./preview.ts";
 import { DoubleBorder, overlayHeight } from "./frame.ts";
 import { SidebarHelp } from "./help.ts";
@@ -16,6 +16,8 @@ import { NameTooltip } from "./name-tooltip.ts";
 // 只依赖终端自动重复，不额外监听 timer；松开后下一次按键的间隔超出窗口即复位。
 export const REPEAT_STEP_AFTER = [1100, 2600] as const;
 export const REPEAT_RESET_AFTER = 450;
+// 仅清理本扩展启动的进程；宽限期后强制终止，不让会话替换无限等待。
+export const EDITOR_STOP_GRACE_MS = 2000;
 // 表头两行；页脚固定为路径一行和按键提示两行，调宽时也保留同样高度。
 const HEADER_ROWS = 2, FOOTER_ROWS = 3;
 
@@ -34,7 +36,7 @@ export class FileSidebar {
   private panel: VStack;
   private floatingScrollbar?: { top: number; size: number; travel: number; max: number };
   private scrollbarGrab?: number;
-  private cache?: { key: string; lines: string[] };
+  private cache?: { key: string; data: readonly TreeRow[]; selected: number; focused: boolean; lines: string[] };
   private frame: { path: string; marker: number }[] = [];
   private pressed?: string;
   private clickedPath?: string;
@@ -46,6 +48,7 @@ export class FileSidebar {
   private closeModal?: () => void;
   private externalRunning = false;
   private child?: ChildProcess;
+  private editorKillTimer?: NodeJS.Timeout;
   private externalDone?: Promise<number | null>;
   private languageSave: Promise<void> = Promise.resolve();
   private languageGeneration = 0;
@@ -54,14 +57,14 @@ export class FileSidebar {
   constructor(private ctx: ExtensionContext, private language: Language = "zh",
     private persistLanguage: (language: Language) => Promise<void> = saveLanguage) {
     this.tree = new FileTree(ctx.cwd, (reveal) => {
-      this.cache = undefined;
       if (reveal) this.revealSelection();
-      this.host?.redraw();
+      // 行数组身份区分结构/状态变化；选择和滚动只请求帧，不清空全部行缓存。
+      this.host?.redraw(false);
     });
     this.rows = { focused: false, render: (width) => this.renderRows(width),
       invalidate: () => { this.cache = undefined; }, handleInput: (data) => this.input(data), handleMouse: (event) => this.mouse(event) };
     this.scroll = new TreeScrollView(this.rows, { follow: "none", overscroll: "contain", scrollbar: "auto" });
-    // 1.4.0 的 contain 仍会将边界残余量回退到主对话；只在自己的组件消费 wheel。
+    // Pi 1.5.0 的 contain 仍可能将边界残余量回退到主对话；只在自己的组件消费 wheel。
     this.scroll.handleMouse = (event) => this.wheel(event, this.scroll);
     const text = (lines: (width: number) => string[]): Component => ({ render: (width) => lines(width).map((line) => truncateToWidth(line, width)), invalidate() {} });
     this.panel = new VStack([
@@ -110,8 +113,8 @@ export class FileSidebar {
   private get canShowNameTip() {
     return !this.disposed && !this.acting && !this.externalRunning && !!this.host?.canInteract && this.host.focused && !this.host.resizing;
   }
-  private updateNameTip(data: ReturnType<FileTree["rows"]>, width: number) {
-    const tui = this.host?.tui, index = data.findIndex(({ node }) => node.path === this.tree.selected), selected = data[index];
+  private updateNameTip(data: readonly TreeRow[], width: number, index: number) {
+    const tui = this.host?.tui, selected = data[index];
     if (!tui || !this.canShowNameTip || !selected
       || visibleWidth(`> ${"  ".repeat(selected.depth)}  ${displayText(selected.node.name)}`) <= width) { this.nameTip?.hide(); return; }
     if (this.nameTip?.tui !== tui) {
@@ -125,29 +128,44 @@ export class FileSidebar {
     } });
   }
   private renderRows(width: number): string[] {
-    const data = this.tree.rows();
-    this.updateNameTip(data, width); // 位置随滚动变化，即使文本缓存命中也要同步气泡。
-    const key = `${width}:${this.tree.revision}:${this.host?.focused}:${this.language}`;
-    if (this.cache?.key === key) return this.cache.lines;
-    this.frame = data.map(({ node, depth }) => ({ path: node.path, marker: 2 + depth * 2 }));
-    const lines = data.map(({ node, depth }) => {
-      const selected = node.path === this.tree.selected;
-      const icon = node.kind === "directory" ? (this.tree.expanded.has(node.path) ? "▾" : "▸") : node.kind === "symlink" ? "↗" : " ";
-      const state = node.state === "loading" ? this.texts.loading : node.error ? ` (${displayText(this.texts.directoryError(node.error.code))})`
-        : node.kind === "directory" && node.state === "loaded" && !node.children.length ? this.texts.emptyDirectory : "";
+    const data = this.tree.rows(), selectedIndex = data.findIndex(({ node }) => node.path === this.tree.selected);
+    this.updateNameTip(data, width, selectedIndex); // 位置随滚动变化，即使文本缓存命中也要同步气泡。
+    const key = `${width}:${this.language}`, focused = this.host?.focused ?? false, cached = this.cache;
+    const sameRows = cached?.key === key && cached.data === data;
+    if (sameRows && cached.selected === selectedIndex && cached.focused === focused) return cached.lines;
+    const text = this.texts, theme = this.ctx.ui.theme;
+    const renderRow = ({ node, depth }: TreeRow, index: number) => {
+      const selected = index === selectedIndex;
+      let icon = " ", state = "";
+      if (node.kind === "directory") icon = this.tree.expanded.has(node.path) ? "▾" : "▸";
+      else if (node.kind === "symlink") icon = "↗";
+      if (node.state === "loading") state = text.loading;
+      else if (node.error) state = ` (${displayText(text.directoryError(node.error.code))})`;
+      else if (node.kind === "directory" && node.state === "loaded" && !node.children.length) state = text.emptyDirectory;
       const label = `${selected ? ">" : " "} ${"  ".repeat(depth)}${icon} ${displayText(node.name)}${state}`;
-      return truncateToWidth(this.ctx.ui.theme.fg(selected && this.host?.focused ? "accent" : node.error ? "error" : "text", label), width);
-    });
-    this.cache = { key, lines }; return lines;
+      const color = node.error ? "error" : "text";
+      return truncateToWidth(theme.fg(selected && focused ? "accent" : color, label), width);
+    };
+    let lines: string[];
+    if (sameRows) {
+      // 保留上一帧数组，避免宿主尚持有的快照被原地改写；只重新着色两条选择行。
+      lines = cached.lines.slice();
+      if (cached.selected >= 0) lines[cached.selected] = renderRow(data[cached.selected]!, cached.selected);
+      if (selectedIndex >= 0 && selectedIndex !== cached.selected) lines[selectedIndex] = renderRow(data[selectedIndex]!, selectedIndex);
+    } else {
+      this.frame = data.map(({ node, depth }) => ({ path: node.path, marker: 2 + depth * 2 }));
+      lines = data.map(renderRow);
+    }
+    this.cache = { key, data, selected: selectedIndex, focused, lines }; return lines;
   }
-  // Pi 1.4.0 的 overlay 只调用 render(width)，不分配 VStack/ScrollView 的视口高度。
+  // Pi 1.5.0 的 overlay 仍只调用 render(width)，不分配 VStack/ScrollView 的视口高度。
   // 复用原树、表头/页脚和 ScrollView 状态，给临时浮层提供有界窗口。
   private renderFloating(width: number): string[] {
     const height = this.treeHeight;
     // 先为滚动条留一列，省略号和全名提示都按真正可见的内容宽度判断。
     const contentWidth = this.tree.rows().length > height ? Math.max(1, width - 1) : width;
     const lines = this.rows.render(contentWidth);
-    this.scroll.updateLayout(lines.length, height, () => this.host.redraw());
+    this.scroll.updateLayout(lines.length, height, () => this.host.redraw(false));
     const size = Math.min(height, Math.max(2, Math.round(height * height / Math.max(1, lines.length))));
     const max = Math.max(0, lines.length - height), travel = height - size;
     const top = max ? Math.round(this.scroll.scrollTop / max * travel) : 0;
@@ -186,7 +204,7 @@ export class FileSidebar {
     if (!this.host?.visible) return;
     const rows = this.tree.rows(), index = rows.findIndex((row) => row.node.path === this.tree.selected);
     const height = this.treeHeight;
-    this.scroll.updateLayout(rows.length, height, () => this.host.redraw());
+    this.scroll.updateLayout(rows.length, height, () => this.host.redraw(false));
     if (index < this.scroll.scrollTop) this.scroll.scrollTo(index);
     else if (index >= this.scroll.scrollTop + height) this.scroll.scrollTo(index - height + 1);
   }
@@ -197,8 +215,10 @@ export class FileSidebar {
     else if (event.toolName === "write" || event.toolName === "edit") {
       const path = event.input.path;
       if (typeof path !== "string") return;
-      const absolute = resolve(this.tree.root, path);
-      if (isWithin(this.tree.root, absolute)) this.tree.markDirty([dirname(absolute)]);
+      try {
+        const absolute = resolveToolPath(this.tree.root, path);
+        if (isWithin(this.tree.root, absolute)) this.tree.markDirty([dirname(absolute)]);
+      } catch { /* 替代 write/edit 的第三方工具可能返回无效路径；不影响工具结果。 */ }
     }
   }
 
@@ -242,12 +262,20 @@ export class FileSidebar {
   }
 
   private currentAction(id: number) { return id === this.actionGeneration && !this.disposed && this.host.alive && this.host.visible; }
+  private stopEditor() {
+    const child = this.child;
+    if (!child || child.exitCode !== null || child.signalCode !== null || this.editorKillTimer) return;
+    child.kill("SIGTERM");
+    this.editorKillTimer = setTimeout(() => {
+      this.editorKillTimer = undefined;
+      if (this.child === child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, EDITOR_STOP_GRACE_MS).unref();
+  }
   private cancelActions() {
-    this.held = undefined;
+    this.held = undefined; this.stopEditor();
     if (!this.acting && !this.closeModal) return;
     this.actionGeneration++; this.acting = false;
     const close = this.closeModal; this.closeModal = undefined; close?.();
-    this.child?.kill();
     if ((!this.host.visible || this.disposed) && this.host.focused) this.host.leave();
   }
   private report(error: unknown) {
@@ -303,8 +331,12 @@ export class FileSidebar {
   private external(path = this.tree.selected) {
     return this.runAction(async (id) => {
       if (!this.ctx.isIdle()) throw new SidebarError("editorBusy");
-      const [actual, command] = await Promise.all([validateFile(this.tree.root, path), readEditorCommand(this.ctx.cwd, this.ctx.isProjectTrusted())]);
+      const command = await readEditorCommand(this.ctx.cwd, this.ctx.isProjectTrusted());
       const argv = parseEditorCommand(command);
+      if (!this.ready(id)) return;
+      if (!this.ctx.isIdle()) throw new SidebarError("editorBusyChanged");
+      // 配置准备完成后再验证，验证后不再等待其他 I/O；仍不能替外部编辑器锁住路径。
+      const file = await validateFile(this.tree.root, path);
       if (!this.ready(id)) return;
       if (!this.ctx.isIdle()) throw new SidebarError("editorBusyChanged");
       const tui = this.host.tui!;
@@ -313,15 +345,21 @@ export class FileSidebar {
       try {
         tui.stop();
         const completion = new Promise<number | null>((resolve, reject) => {
-          const child = spawn(argv[0]!, [...argv.slice(1), actual], { cwd: this.ctx.cwd, stdio: "inherit", shell: false });
-          this.child = child; child.once("error", reject); child.once("close", resolve);
+          const child = spawn(argv[0]!, [...argv.slice(1), file.path], { cwd: this.ctx.cwd, stdio: "inherit", shell: false });
+          let failure: Error | undefined;
+          this.child = child;
+          // error（包括终止失败）不代表进程已退出；必须等 close 才能恢复 TUI。
+          child.on("error", (error) => { failure = error; });
+          child.once("close", (code) => { if (failure) reject(failure); else resolve(code); });
         });
         this.externalDone = completion; code = await completion;
       } finally {
+        if (this.editorKillTimer) clearTimeout(this.editorKillTimer);
+        this.editorKillTimer = undefined;
         this.child = undefined; this.externalDone = undefined; this.externalRunning = false;
         if (!this.disposed && this.host.alive && this.host.tui === tui) {
           tui.start(); this.host.setPaused(false); this.host.redraw();
-          // Pi 1.4.0 的 stop() 取消帧任务却保留待绘标记；普通请求会被合并掉，必须强制排入恢复帧。
+          // Pi 1.5.0 的 stop() 仍会保留待绘标记；强制排入恢复帧，避免普通请求被合并掉。
           tui.requestRender(true);
           void this.tree.refresh([dirname(path)]);
         }

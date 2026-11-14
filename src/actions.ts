@@ -1,26 +1,42 @@
+import type { BigIntStats } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { copyToClipboard, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { isWithin } from "./tree.ts";
 import { SidebarError } from "./i18n.ts";
 
 /** 动作前重新验证路径与普通文件；不跟随根内部的文件/目录链接。 */
-export async function validateFile(root: string, path: string): Promise<string> {
+export async function validateFile(root: string, path: string): Promise<{ path: string; dev: bigint; ino: bigint }> {
   const base = resolve(root), absolute = resolve(path);
   if (!isWithin(base, absolute)) throw new SidebarError("outsideRoot");
-  const parts = relative(base, absolute).split(sep).filter(Boolean);
+  const child = relative(base, absolute), parts = child.split(sep).filter(Boolean);
   if (!parts.length) throw new SidebarError("fileOnly");
-  let current = base;
+  let current = base, info: BigIntStats | undefined;
   for (const [index, part] of parts.entries()) {
     current = join(current, part);
-    const info = await lstat(current);
+    info = await lstat(current, { bigint: true });
     if (info.isSymbolicLink()) throw new SidebarError("symlink");
     if (index === parts.length - 1 ? !info.isFile() : !info.isDirectory()) throw new SidebarError("notFile");
   }
   const actualRoot = await realpath(base), actual = await realpath(absolute);
   if (!isWithin(actualRoot, actual)) throw new SidebarError("movedOutsideRoot");
-  return actual;
+  if (actual !== resolve(actualRoot, child)) throw new SidebarError("fileChanged");
+  return { path: actual, dev: info!.dev, ino: info!.ino };
+}
+
+/** 与 Pi 1.5 工具保持相同的纯路径规范化；不读文件、不跟随链接。 */
+export function resolveToolPath(root: string, path: string): string {
+  let normalized = path.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, " ").replace(/^@/, "");
+  if (process.platform === "win32" && !normalized.includes("\\")) {
+    const drive = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(normalized);
+    if (drive) normalized = `${drive[1]!.toUpperCase()}:\\${drive[2]?.replaceAll("/", "\\") ?? ""}`;
+  }
+  if (normalized === "~") normalized = homedir();
+  else if (normalized.startsWith("~/") || (process.platform === "win32" && normalized.startsWith("~\\"))) normalized = join(homedir(), normalized.slice(2));
+  if (normalized.startsWith("file://")) normalized = fileURLToPath(normalized);
+  return resolve(root, normalized);
 }
 
 export function formatReference(path: string): string {

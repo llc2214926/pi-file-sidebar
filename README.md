@@ -2,9 +2,9 @@
 
 **[English](README.md)** | [简体中文](README.ZH.md)
 
-A native left-side file tree for Pi >=1.5.0 fullscreen mode (verified on 1.5.0 and 1.5.2), backward-compatible with Pi 1.4.0. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
+A native left-side file tree for Pi **>=1.5.0** fullscreen mode. Wide windows keep the Pi main UI, editor, and native conversation scrolling on the right. In narrow windows the tree stays hidden until opened manually, then temporarily overlays the left part of the conversation and retracts when you return to the editor. It uses the host renderer.
 
-Version 0.3.2 targets Pi >=1.5.0 with a minimum host version of **>=1.4.0**. Working-directory switching now belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
+Version 0.3.3 requires stable Pi **>=1.5.0**; **Pi 1.4.x is no longer supported**. Working-directory switching belongs to the independent **pi-cd-workspace** extension; this package only provides the file sidebar. Formal TUI acceptance on a real terminal is not yet complete.
 
 ## Installation
 
@@ -32,7 +32,7 @@ Local publishing uses `npm pack` to build a versioned package, unpacks it into P
 The script requires the development dependencies to be installed (run `npm install --ignore-scripts` first), runs the type check, then packs. It does not upload to npm, commit code, or auto-reload Pi.
 
 - The version is read from `package.json` and never auto-incremented; packages and manifests go to `artifacts/releases/<version>/`, the npm cache lives in `artifacts/npm-cache/`, and neither is committed.
-- By default it installs to `~/.pi/agent/local-packages/pi-file-sidebar/<version>`; if `PI_CODING_AGENT_DIR` is set, that directory is used instead. Automatic installation accepts stable Pi versions >=1.4.0 (build metadata is allowed; prereleases and malformed versions are rejected).
+- By default it installs to `~/.pi/agent/local-packages/pi-file-sidebar/<version>`; if `PI_CODING_AGENT_DIR` is set, that directory is used instead. Automatic installation accepts stable Pi versions >=1.5.0 (build metadata is allowed; prereleases and malformed versions are rejected).
 - An existing version directory with identical content is reused; differing content or a symlinked target is never overwritten. **After changing published content, bump the `package.json` version before publishing.**
 - Old registrations under the same install root are only removed after the new version is registered and the registration is confirmed to be persisted; old version files are kept, and installs in other locations or project-level registrations are not touched. Sidebar registrations with custom resource filters must be switched manually — the script never overwrites them.
 - On failure the script stops and preserves diagnostics; it does not change directory ownership or force-delete live locks. If old-registration cleanup fails, both old and new registrations may remain; resolve the issue and rerun the script, and do not `/reload` Pi until it succeeds.
@@ -40,14 +40,14 @@ The script requires the development dependencies to be installed (run `npm insta
 An unpacked version can also be registered manually:
 
 ```bash
-pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.2
+pi install ~/.pi/agent/local-packages/pi-file-sidebar/0.3.3
 ```
 
 The install directory is generated from the local versioned package. After installing, run `/reload` in the current Pi or restart Pi. Runtime uses the standalone installed copy, does not depend on the source repository, and needs no npm account.
 
 The entry point is `extensions/index.ts`. The package only declares peerDependencies on the host and never ships a second copy of the Pi SDK.
 
-The development baseline is Pi **1.5.0**, with Pi **1.4.0** retained as the backward-compatibility target, on Node **24.22.2**, macOS Apple Silicon. Runtime and installation version checks accept stable **>=1.4.0** versions, with no upper-version pin; build metadata is allowed and prereleases/malformed versions are rejected. A passing version check is not a claim that every later host, platform, or terminal is verified: native layout and focus capability checks remain in place. Formal real-terminal acceptance is still pending. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
+The development baseline is Pi **1.5.0**, with **1.5.2** as an additional verification target, on Node **24.22.2**, macOS Apple Silicon. Runtime and installation version checks accept stable **>=1.5.0** versions, with no upper-version pin; build metadata is allowed and prereleases/malformed versions are rejected. A passing version check is not a claim that every later host, platform, or terminal is verified: native layout and focus capability checks remain in place. Formal real-terminal acceptance is still pending. The tree is hidden in regular mode; RPC/print/JSON sessions never create a sidebar runtime or emit UI/ANSI. If the host's layout or focus capabilities are incompatible, or another extension takes over the root, this extension does not override its layout; use `status` to see the reason.
 
 If required host capabilities disappear after mounting, the sidebar cancels width adjustment, closes its own overlays and yields the layout. It restores the original editor only when focus can still be read and set. If the layout setter is unavailable, its owned wrapper becomes a main-UI-only pass-through instead of calling the missing method; an explicit `off` can retry restoration after the capability returns. Foreign layouts/focus are not overwritten. The retired sidebar stays disabled until reload; if the host also loses its focus APIs, automatic focus restoration cannot be guaranteed.
 
@@ -58,7 +58,7 @@ If required host capabilities disappear after mounting, the sidebar cancels widt
 | `/file-sidebar`, `/file-sidebar focus` | Show the tree and enter tree focus; use a temporary left overlay in narrow windows |
 | `/file-sidebar on` | Enable automatic display without taking focus; stays hidden in narrow windows |
 | `/file-sidebar off` | Close, cancel unconfirmed actions/modals, and restore the main UI |
-| `/file-sidebar refresh` | Refresh loaded, visible, expanded directories; other dirty directories are handled when re-expanded |
+| `/file-sidebar refresh` | Refresh loaded, visible, expanded directories; dirty expanded descendants resume when an ancestor is reopened |
 | `/file-sidebar width 32` | Set this runtime's width; integers 24–48; narrow windows hide the docked tree and clamp an open temporary overlay to fit |
 | `/file-sidebar lang zh`, `/file-sidebar lang en` | Switch the whole sidebar between Chinese and English and save the choice |
 | `/file-sidebar lang` | Show the current language and switching usage |
@@ -180,6 +180,8 @@ The read-only preview, Space action menu, and `h` key help all use a double-line
 
 File contents are only read on an explicit Enter, double-click, or menu choice. UTF-8 is supported, showing the path, line numbers, syntax highlighting, scrolling, and truncation notes. Reads are capped at **512 KiB** and display at **5000 lines**; a UTF-8 character truncated at the end never turns into mojibake. Empty files, binaries, non-UTF-8, permission, and missing-file errors have explanations. The preview never writes files or modifies drafts. Esc or clicking the bottom hint line closes it and returns to the original tree selection.
 
+Before reading any content, preview compares the opened file's device/inode identity with the validated file and rechecks the original path and its ancestors. If the file or directory path changed, it closes the handle without reading the content. The no-follow open flag alone does not protect parent directories.
+
 ### Copy and Reference
 
 Copying uses Pi's public `copyToClipboard()` with the raw path characters, never reusing sanitized UI strings. Directories and links can be copied.
@@ -194,7 +196,11 @@ Priority matches Pi: trusted project/user `externalEditor`, then `$VISUAL`, `$ED
 
 The command is parsed into a program and separate argv; quotes and backslash escapes are supported, but shell pipes, redirection, and variable interpolation are not executed. Files open as a standalone absolute-path argument, and no prompt temp copy is created.
 
-Pi must be idle; state is re-checked right before launch. The TUI is stopped first, the process is launched asynchronously, and the TUI is restored with an explicit full redraw on the normal, non-zero, and launch-failure paths. No extra Esc is needed to bring the screen back; the original tree selection and main editor draft/cursor are preserved. Closing/replacing a session first waits for the terminated old editor process; old results never start a renderer on a new context.
+Pi must be idle. Editor settings are read and parsed first; the file is then validated immediately before launch, followed by fresh idle/runtime checks. The TUI is stopped first, the process is launched asynchronously, and the TUI is restored with an explicit full redraw on the normal, non-zero, and launch-failure paths. No extra Esc is needed to bring the screen back; the original tree selection and main editor draft/cursor are preserved.
+
+Closing the sidebar or replacing its session requests termination of its editor child. If that child has not exited after **2 seconds**, it is force-terminated; cleanup still waits for the close event, and old results never restart a renderer in a new context. Normal exit clears the termination deadline.
+
+**Path checks are not an editor sandbox.** The external editor runs with your normal permissions and may reopen the pathname after launch. The sidebar does not lock project paths or prevent another process from replacing them after the last check.
 
 **GUI wait semantics:** configure waiting commands such as `code --wait` or `open -W -n -a TextEdit`. `open -W` waits for the app to exit; without a wait flag, the process exiting only means the launch command finished, not that editing is done. Closing Pi never forcibly closes GUI document windows that were launched independently.
 
@@ -202,7 +208,9 @@ Pi must be idle; state is re-checked right before launch. The TUI is stopped fir
 
 `ctx.cwd` is the fixed root, read asynchronously layer by layer; unexpanded descendants are never scanned. Dot entries, `.git`, and `node_modules` are hidden by default. Symlinks are never auto-expanded or previewed; directory loads and file actions re-check links/root scope.
 
-Refresh sources: first show/expand, manual refresh, re-entering the tree, successful write/edit/bash, and returning from the external editor. Tool events only mark dirty with a 40ms debounce; per-directory single-flight; new dirty marks during a read are never lost. Hidden or collapsed directories pause active reads; results from stale runtimes or removed nodes are discarded.
+Refresh sources: first show/expand, manual refresh, re-entering the tree, successful write/edit/bash, and returning from the external editor. Tool events only mark dirty with a 40ms debounce; per-directory single-flight; new dirty marks during a read are never lost. Write/edit paths follow Pi's normalization, including a leading `@`, `~`, Unicode spaces, and file URLs. When a tool creates new parent directories, the nearest loaded ancestor is marked instead of losing the refresh. Hidden or collapsed directories pause active reads; reopening an ancestor resumes its visible, expanded dirty descendants. Results from stale runtimes or removed nodes are discarded.
+
+Selection-only moves reuse the other rows and restyle just the old and new selected rows; scrolling does not clear that cache. Structure, file state, width, language, and theme changes still invalidate the affected rendering. Selection movement and scrolling do not reread directories.
 
 **There is no watcher.** External changes are not guaranteed to appear immediately; use r or re-enter the sidebar to refresh. The sidebar itself never creates, renames, moves, deletes, or saves project files; only the external editor the user explicitly launched can modify target files. Language switching writes only the extension's dedicated preference file above. The only writes owned by the sidebar are its language preference; it does not write or archive Pi session files.
 
@@ -212,17 +220,18 @@ The formal sources, dependencies, and project configuration are kept as-is. Type
 
 ```bash
 npm run typecheck
+# When local regression files are present (not committed or shipped):
 ./node_modules/.bin/tsc -p tests/tsconfig.json
 node --import tsx --test tests/*.test.ts
 ```
 
-The automated regressions cover sidebar command registration, menus, language, and host renderer/input routing with an in-memory terminal. Run the same checks against Pi 1.5.0 (development baseline), 1.5.2 (current host), and Pi 1.4.0 (backward compatibility) in isolated dependency trees when changing host compatibility. All three pass source/test type checks and 58 local regressions. A real InteractiveMode with an in-memory terminal also passes four-extension co-loading in two orders, focus restoration, reload, and session replacement on all three versions. They also cover retiring a name bubble after the host has captured its current-frame overlay list: detached getters remain valid and retired components cannot render a later bubble. They do not replace real-terminal acceptance.
+The local regressions use real Pi components with an in-memory terminal. They cover sidebar commands, menus, language switching and real preference saves, renderer/input routing, file replacement around preview open, external-editor cleanup, directory refresh, and selection-cache invalidation. Run source/test type checks and regressions against **Pi 1.5.0 and 1.5.2** in isolated dependency trees when changing host integration. Pi 1.4.x is tested only as a rejected version, not as a supported runtime. Tests remain local and are not included in Git commits or release packages; their results do not replace real-terminal acceptance.
 
 ### Live Acceptance for Independent Extensions (Not Yet Done)
 
-Split validation passes on Pi 1.4.0 and 1.5.0: source/test type checks, local regressions, and unpacked-package loading. The companion workspace tests exercise both load orders, fullscreen/regular modes, separate language preferences, and modal/focus isolation with real host components and an in-memory terminal. The background PTY attempt was blocked before Pi started (`os.openpty`: `Operation not permitted`), so real-terminal session replacement/reload remains unverified after the split.
+Earlier split/co-loading checks and a blocked background PTY attempt were not real-terminal acceptance of this revision. Session replacement, reload, and coexistence with companion extensions still need the checks below.
 
-Run the live-acceptance sections on **Pi 1.5.0, Pi 1.5.2, and Pi 1.4.0**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance. Use disposable projects and an isolated `PI_CODING_AGENT_DIR`.
+Run the live-acceptance sections on **Pi 1.5.0 and Pi 1.5.2**. Automated tests and background PTY smoke checks do not replace human real-terminal acceptance. Use disposable projects and an isolated `PI_CODING_AGENT_DIR`.
 
 - Load each extension alone and both together in either order. Commands must be unambiguous; directory menus must not contain cd actions.
 - Open/cancel `/cd` at 80 and 120 columns: keep the sidebar root, selection, width, language, editor draft and focus unchanged. The picker must not allow Ctrl+Shift+E to steal focus or leak wheel events to the conversation.
@@ -241,11 +250,18 @@ Run the live-acceptance sections on **Pi 1.5.0, Pi 1.5.2, and Pi 1.4.0**. Automa
 - In the file tree, repeatedly shrink from 120 columns through 97/96/80/40/26, then enlarge again. At each width, use ↑/↓ to alternate between a truncated long name and a short name. The bubble must appear/disappear without a `name-tooltip` geometry exception, stale content or lost focus. Also close/disable the sidebar with a bubble visible and confirm no overlay remains.
 - With help, the menu, or a preview open, shrink and then enlarge the window: the modal must not be cancelled, and closing it returns to the floating tree or the docked layout.
 
+### Live Acceptance for File Safety and Refresh (Not Yet Done)
+
+- In a disposable project, exercise files disappearing or being replaced before preview/editor launch. Rejections must preserve the draft and renderer; use only disposable outside-project fixtures when checking boundaries.
+- Use write to create several new parent directories, then write into an already expanded directory with an `@`-prefixed path. The affected branch must refresh without a manual `r` and without scanning unexpanded descendants.
+- Expand a nested directory, collapse its ancestor, change the nested directory through a tool, then reopen the ancestor. The still-expanded descendant must show the change; repeat with hidden entries and off/on.
+- With thousands of visible rows, hold the arrows and check responsiveness, selection coloring, scroll reveal, and the name bubble. Repeat after resizing, changing language/theme, and directory refresh.
+
 ### Live Acceptance for the External Editor (Not Yet Done)
 
 - At 80 and 120 columns, launch using both tree `e` and menu Enter/Space. After exit, press no keys: the conversation and tree must repaint automatically with selection, width, draft and cursor preserved.
 - With isolated settings, cover normal exit, non-zero exit, a missing command, a GUI launcher that returns immediately, and waiting commands such as `code --wait`. A paused TUI while a waiting GUI editor is running is expected; a blank screen after its process exits is not.
-- Check rejection while Pi is busy and reload/session replacement during editing: replacement must wait for old child cleanup, and old completions must not restart a renderer or notify a new session.
+- Check rejection while Pi is busy or a file becomes a symlink during preparation. For a disposable editor process that ignores SIGTERM, off/disposal must escalate after 2 seconds and wait for close; replacement must not restart or notify through the old runtime.
 
 ### Live Acceptance for Language Switching (Not Yet Done)
 

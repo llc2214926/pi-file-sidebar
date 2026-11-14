@@ -7,7 +7,7 @@ export type HostReason = "disposed" | "incompatible" | "closed" | "regular" | "w
 const PROBE = "pi-file-sidebar:host";
 export const ACTIVATE = "ctrl+shift+e";
 
-// Pi 1.4.0 / 1.5.0 的布局 getter 尚非公共契约；必要内部读取集中在本模块。
+// Pi 1.5.0 的布局 getter 尚非公共契约；必要内部读取集中在本模块。
 function getFocus(tui: NativeTUI | undefined): Component | null {
   return typeof tui?.getFocusedComponent === "function" ? tui.getFocusedComponent() : null;
 }
@@ -81,7 +81,8 @@ export class SidebarHost {
     if (this.raw?.mode !== "fullscreen") return "regular";
     if (!this.main || !this.wrapper) return "waiting";
     if (!this.visible) return "small";
-    return this.paused ? "external" : this.floating ? "floating" : "mounted";
+    if (this.paused) return "external";
+    return this.floating ? "floating" : "mounted";
   }
   get tui(): TUI | undefined { return this.alive ? this.raw : undefined; }
 
@@ -253,8 +254,8 @@ export class SidebarHost {
   setEnabled(enabled: boolean) {
     if (this.disposed || (enabled && !this.alive)) return;
     this.finishResize(false); this.enabled = enabled;
-    if (!enabled) { this.release(); this.detach(); }
-    else this.inspect();
+    if (enabled) this.inspect();
+    else { this.release(); this.detach(); }
     this.emit();
   }
   prompt(start: boolean) {
@@ -267,7 +268,7 @@ export class SidebarHost {
     if (paused) this.finishResize(false); else this.queue();
     this.emit();
   }
-  redraw() { this.panel.invalidate(); this.raw?.requestRender(); }
+  redraw(invalidate = true) { if (invalidate) this.panel.invalidate(); this.raw?.requestRender(); }
 
   private detach() {
     this.closeOverlay(); this.release();
