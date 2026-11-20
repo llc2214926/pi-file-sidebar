@@ -474,7 +474,7 @@ export class FileSidebar {
       ? { key, since: now, last: now } : { key, since: held.since, last: now };
     this.held = next;
     const duration = now - next.since;
-    this.tree.move(direction * (1 + REPEAT_STEP_AFTER.filter((threshold) => duration >= threshold).length));
+    this.tree.move(direction * (1 + REPEAT_STEP_AFTER.filter((threshold) => duration >= threshold).length), true);
   }
 
   private wheel(event: TuiMouseEvent, target: Component) {

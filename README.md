@@ -84,7 +84,7 @@ pi --no-extensions -e ./extensions/index.ts -e ../pi-cd-workspace/extensions/ind
 
 | Input in tree | Behavior |
 |---|---|
-| ↑ / ↓ | Move selection; holding ↑/↓ accelerates (2 rows per repeat after ~1.1s, 3 rows after ~2.6s) |
+| ↑ / ↓ | Move selection, wrapping from first to last and vice versa; holding ↑/↓ accelerates (2 rows per repeat after ~1.1s, 3 rows after ~2.6s) |
 | Home / End | Select the first / last item |
 | → / ← | Expand directory; collapse directory or go to parent |
 | Ctrl+U / Ctrl+D | Half-page movement inside the tree |

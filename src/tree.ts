@@ -86,10 +86,14 @@ export class FileTree {
     if (path !== this.current) { this.current = path; this.changed(true, false); }
     return true;
   }
-  move(delta: number) {
+  move(delta: number, wrap = false) {
     const rows = this.rows(), index = Math.max(0, rows.findIndex((row) => row.node.path === this.current));
-    const next = rows[Math.max(0, Math.min(rows.length - 1, index + delta))];
-    if (next) this.select(next.node.path);
+    const last = rows.length - 1;
+    const next = wrap && delta < 0 && index === 0 ? last
+      : wrap && delta > 0 && index === last ? 0
+      : Math.max(0, Math.min(last, index + delta));
+    const row = rows[next];
+    if (row) this.select(row.node.path);
   }
   async expand(path = this.current) {
     if (this.nodes.get(path)?.kind !== "directory" || this.disposed || !this.rows().some((row) => row.node.path === path)) return;
